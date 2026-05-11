@@ -1,0 +1,81 @@
+{
+  "run_id": "longmemeval-nanomem-gpt-oss-120b-judge",
+  "output_dir": "runs",
+  "cache_dir": "runs/cache",
+  "dataset": {
+    "path": "data/longmemeval/longmemeval_s_cleaned.unified.json",
+    "format": "unified"
+  },
+  "memory_system": {
+    "name": "nanomem",
+    "config": {
+      "storage": {
+        "policy": "fact",
+        "backend": "llm",
+        "chunk_tokens": 1024,
+        "target_roles": [
+          "user"
+        ],
+        "llm_model": "GPT-oss-120b",
+        "llm_base_url": "REPLACE_WITH_LLM_BASE_URL",
+        "llm_api_key": "REPLACE_WITH_LLM_API_KEY",
+        "llm_max_tokens": 1024,
+        "retry": {
+          "max_attempts": 3,
+          "initial_delay_seconds": 1.0,
+          "backoff_multiplier": 2.0
+        },
+        "fail_on_error": false
+      },
+      "retrieve": {
+        "policy": "dense_cosine_v1",
+        "top_k": 50,
+        "retrieval_fields": [
+          "text",
+          "tags"
+        ],
+        "embedding_backend": "openai_compatible",
+        "embedding_model": "qwen3-0.6b-embedding",
+        "embedding_base_url": "REPLACE_WITH_EMBED_BASE_URL",
+        "embedding_api_key": "REPLACE_WITH_EMBED_API_KEY",
+        "embedding_cache_path": "runs/embedding-cache",
+        "embedding_cache_namespace": "qwen3-0.6b-embedding",
+        "warm_storage_embeddings": true
+      },
+      "render": {
+        "policy": "adaptive_markdown_temporal_v1",
+        "merge_policy": "temporal_metadata_merge_v1",
+        "context_tokens": 1000,
+        "include_timestamps": true,
+        "merge_same_timestamp": false,
+        "min_group_size": 2,
+        "sort_by_time": false
+      },
+      "update_policy": "append_only_v1",
+      "metadata": {
+        "extract_model": "GPT-oss-120b",
+        "embedding_model": "qwen3-0.6b-embedding"
+      }
+    }
+  },
+  "agent": {
+    "name": "fixed_query"
+  },
+  "evaluator": {
+    "name": "dataset_prompt_judge",
+    "config": {
+      "dataset_family": "longmemeval",
+      "model": "GPT-oss-120b",
+      "base_url": "REPLACE_WITH_VERIFY_BASE_URL",
+      "api_key": "REPLACE_WITH_VERIFY_API_KEY",
+      "max_tokens": 8192
+    }
+  },
+  "top_k": 50,
+  "context_budget_tokens": 1000,
+  "execution": {
+    "max_workers": 1,
+    "fail_fast": true,
+    "preserve_order": true
+  }
+}
