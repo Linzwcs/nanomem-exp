@@ -61,7 +61,7 @@
     "name": "think_step_by_step",
     "config": {
       "model": "gpt-oss-120b",
-      "base_url": "REPLACE_WITH_QA_BASE_URL",
+      "base_url": "http://100.97.157.98:19292/v1",
       "api_key": "REPLACE_WITH_QA_API_KEY",
       "max_tokens": 8192,
       "temperature": 0.0,
@@ -73,7 +73,7 @@
     "config": {
       "dataset_family": "locomo",
       "model": "gpt-oss-120b",
-      "base_url": "REPLACE_WITH_VERIFY_BASE_URL",
+      "base_url": "http://100.97.157.98:19292/v1",
       "api_key": "REPLACE_WITH_VERIFY_API_KEY",
       "max_tokens": 8192
     }
