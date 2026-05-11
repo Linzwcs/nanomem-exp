@@ -96,6 +96,7 @@ class LocomoAdapterTest(unittest.TestCase):
         message = item["conversations"][0][0]
         self.assertEqual(message["message_id"], "D1:1")
         self.assertEqual(message["role"], "participant")
+        self.assertEqual(message["speaker"], "Ava")
         self.assertEqual(message["content"], "I moved to Seattle.")
         self.assertEqual(message["metadata"]["speaker"], "Ava")
 

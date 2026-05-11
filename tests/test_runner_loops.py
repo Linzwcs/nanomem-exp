@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
 import re
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from memexp import (
@@ -12,6 +15,7 @@ from memexp import (
     EvaluationRunner,
     ExperimentRunner,
     FixedQueryAgent,
+    JsonlRecordSink,
     ListRunLogger,
     MemoryBuildRunner,
     NanoMemConfig,
@@ -23,6 +27,7 @@ from memexp import (
     QuestionLabel,
 )
 from memexp.runs import AnswerRunner
+from memexp.runs.serialization import answer_record_to_dict
 
 
 class FakeEncoding:
@@ -253,6 +258,66 @@ class RunnerLoopsTest(unittest.TestCase):
             {"build", "answer", "evaluate"},
         )
         self.assertFalse(any(event.event == "failed" for event in logger.events))
+
+    def test_answer_runner_writes_qa_records_immediately_to_sink(self) -> None:
+        dataset = Dataset(
+            name="toy",
+            items=(
+                DatasetItem(
+                    item_id="item-1",
+                    conversations=(
+                        (
+                            {
+                                "role": "user",
+                                "content": "I moved to Seattle.",
+                                "timestamp": "2024-01-01",
+                            },
+                        ),
+                    ),
+                    questions=(
+                        DatasetQuestion(
+                            question_id="q1",
+                            query="Where did the user move?",
+                            query_time="2024-01-02",
+                            label=QuestionLabel(reference_answer="Seattle"),
+                        ),
+                        DatasetQuestion(
+                            question_id="q2",
+                            query="What city is mentioned?",
+                            query_time="2024-01-02",
+                            label=QuestionLabel(reference_answer="Seattle"),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        memory_system = NanoMemSystem(
+            NanoMemConfig(
+                storage=StorageConfig(backend="heuristic", target_roles=("user",)),
+                retrieve=RetrieveConfig(top_k=3),
+                render=RenderConfig(policy="timeline_v1", context_tokens=40),
+            )
+        )
+        build = MemoryBuildRunner(memory_system).run(dataset)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "answers.jsonl"
+            sink = JsonlRecordSink(path, answer_record_to_dict)
+            answer = AnswerRunner(
+                memory_system,
+                FixedQueryAgent(),
+                top_k=3,
+                context_budget_tokens=40,
+            ).run(dataset, build, record_sink=sink)
+
+            lines = path.read_text(encoding="utf-8").splitlines()
+
+        self.assertEqual(answer.summary["answer_count"], 2)
+        self.assertEqual(len(lines), 2)
+        self.assertEqual(
+            [json.loads(line)["question_id"] for line in lines],
+            ["q1", "q2"],
+        )
 
 
 if __name__ == "__main__":

@@ -40,7 +40,9 @@
         "embedding_api_key": "REPLACE_WITH_EMBED_API_KEY",
         "embedding_cache_path": "runs/embedding-cache",
         "embedding_cache_namespace": "qwen3-0.6b-embedding",
-        "warm_storage_embeddings": true
+        "warm_storage_embeddings": true,
+        "context_cache_path": "runs/context-cache",
+        "context_cache_namespace": "nanomem-context-v1"
       },
       "render": {
         "policy": "adaptive_markdown_temporal_v1",

@@ -1,0 +1,52 @@
+# OS and editor files
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Python caches and build outputs
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local environment and private config
+.env
+.env.*
+!.env.example
+configs/*.local.json
+configs/*.private.json
+configs/private/
+
+# Experiment outputs and caches
+/runs/
+/artifacts/
+/results/
+/output/
+/outputs/
+*.log
+
+# Model, tokenizer, and embedding caches
+.tiktoken_cache/
+tiktoken_cache/
+embedding-cache/
+*.sqlite
+*.sqlite3
+*.db
+
+data/

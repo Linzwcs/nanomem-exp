@@ -57,7 +57,22 @@ class RunSpecManifestTest(unittest.TestCase):
             )
 
             dataset = load_unified_dataset(dataset_path)
-            output = execute_experiment_run_spec(load_experiment_run_spec(spec_path))
+            live_answer_line_counts: list[int] = []
+
+            def assert_live_answers_before_manifest(**kwargs):
+                run_dir = Path(kwargs["run_dir"])
+                live_answer_line_counts.append(
+                    len((run_dir / "answers.jsonl").read_text(encoding="utf-8").splitlines())
+                )
+                from memexp.runs.manifest import write_run_manifest
+
+                return write_run_manifest(**kwargs)
+
+            with patch(
+                "memexp.runs.spec.write_run_manifest",
+                side_effect=assert_live_answers_before_manifest,
+            ):
+                output = execute_experiment_run_spec(load_experiment_run_spec(spec_path))
 
             run_dir = root / "runs" / "toy-run"
             manifest = json.loads((run_dir / "manifest.json").read_text())
@@ -67,6 +82,7 @@ class RunSpecManifestTest(unittest.TestCase):
             self.assertEqual(output.run_dir, run_dir)
             self.assertEqual(manifest["run_id"], "toy-run")
             self.assertEqual(manifest["report"]["accuracy"], 1.0)
+            self.assertEqual(live_answer_line_counts, [1])
             self.assertEqual(report[0]["memory_system"], "raw_messages")
             self.assertTrue((run_dir / "build.jsonl").exists())
             self.assertTrue((run_dir / "answers.jsonl").exists())
