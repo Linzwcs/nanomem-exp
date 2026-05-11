@@ -13,6 +13,7 @@ from memexp.memsys.nanomem.config import NanoMemConfig, StorageConfig, config_fo
 from memexp.memsys.nanomem.utils import (
     estimate_tokens,
     message_role,
+    message_speaker,
     message_source_id,
     message_text,
     message_timestamp,
@@ -20,16 +21,30 @@ from memexp.memsys.nanomem.utils import (
 )
 
 FACT_EXTRACTION_SYSTEM = """
-Extract user-memory facts from one dialogue chunk.
+Extract structured facts from one memory item.
 Return JSON only:
-{"facts":[{"text":"...","tags":["..."]}]}
+{
+  "facts": [{"text": "...", "tags": ["...", "..."]}]
+}
 
 Rules:
-- Extract only facts grounded in the target speaker messages.
-- Keep each fact short, self-contained, explicit, and retrieval-oriented.
-- Preserve names, places, dates, relative time expressions, preferences, plans, updates, and outcomes.
-- Do not invent facts or infer beyond the text.
-- Ignore filler, greetings, generic encouragement, and pure conversational scaffolding.
+- You will receive:
+  - <target_memory_text>: owner-focused text.
+  - <full_dialogue_context>: full chunk dialogue context.
+  - <speaker_reference>: the exact speaker phrase to use when provided.
+- Extract facts about the target speaker from <target_memory_text>.
+- Use <full_dialogue_context> only to resolve references (pronouns, Q/A links, omitted objects, temporal anchor).
+- Do not invent facts.
+- Keep facts short, retrieval-oriented, and faithful to the memory text.
+- Every fact must be a standalone sentence fragment with an explicit third-person subject.
+- If <speaker_reference> is non-empty, start each fact with that exact phrase whenever possible, for example "user said" or "assistant said".
+- Otherwise, use the target speaker's name as the subject whenever possible; do not omit the subject.
+- Do not start facts with bare verbs or verbless fragments such as "Went to...", "Joined...", or "At the support group...".
+- Preserve answer-critical details when present: time expressions, causality, outcomes, counts, and plans.
+- Preserve relative time expressions exactly when they appear, such as "yesterday", "last week", "next month", "two years ago", or "recently".
+- Ignore filler, greetings, and generic encouragement.
+- Prefer self-contained facts over vague thematic summaries.
+- Return all facts.
 """.strip()
 
 
@@ -64,8 +79,8 @@ class _LLMExtractionFailure(Exception):
 
 
 def _render_message(message: dict[str, Any]) -> str:
-    role = message_role(message) or "unknown"
-    return f"{role}: {message_text(message)}"
+    speaker = message_speaker(message) or message_role(message) or "unknown"
+    return f"speaker: {speaker}\ncontent: {message_text(message)}"
 
 
 def _chunk_conversation(
@@ -130,14 +145,29 @@ def _heuristic_facts(
 ) -> list[dict[str, Any]]:
     facts: list[dict[str, Any]] = []
     for message in target_messages:
+        message_reference = _speaker_reference_for_message(
+            message,
+            fallback=speaker_reference,
+        )
         for sentence in _sentence_candidates(message_text(message)):
             for segment in _split_to_token_bounded_segments(sentence):
                 lowered = segment.lower()
-                if speaker_reference and not lowered.startswith(
-                        speaker_reference.lower()):
-                    segment = f"{speaker_reference} {segment}"
+                if message_reference and not lowered.startswith(
+                        message_reference.lower()):
+                    segment = f"{message_reference} {segment}"
                 facts.append({"text": segment, "tags": []})
     return facts
+
+
+def _speaker_reference_for_message(
+    message: dict[str, Any],
+    *,
+    fallback: str,
+) -> str:
+    speaker = message_speaker(message)
+    if speaker:
+        return f"{speaker} said"
+    return fallback
 
 
 def _extract_json_object(text: str) -> dict[str, Any] | None:
@@ -324,6 +354,9 @@ class FactStoragePolicy(StoragePolicy):
             ]
             if not target_messages:
                 continue
+            target_speakers = tuple(
+                dict.fromkeys(speaker for message in target_messages
+                              if (speaker := message_speaker(message))))
             available_at = source_time_end or message_timestamp(
                 target_messages[-1])
             speaker_reference = f"{role} said"
@@ -368,6 +401,7 @@ class FactStoragePolicy(StoragePolicy):
                             "conversation_index": conversation_index,
                             "chunk_index": chunk_index,
                             "target_role": role,
+                            "target_speakers": target_speakers,
                             "available_at": available_at,
                             "source_time_range": {
                                 "start": source_time_start,

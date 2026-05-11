@@ -97,8 +97,9 @@ def _conversations_from_session_records(
 
 
 def _message_from_turn(turn: dict[str, Any]) -> dict[str, Any]:
+    speaker = text_or_none(turn.get("speaker"))
     metadata: dict[str, Any] = {
-        "speaker": text_or_none(turn.get("speaker")),
+        "speaker": speaker,
         "session_id": text_or_none(turn.get("session_id")),
         "turn_index": turn.get("turn_index"),
     }
@@ -109,13 +110,16 @@ def _message_from_turn(turn: dict[str, Any]) -> dict[str, Any]:
             if value is not None:
                 metadata[key] = value
 
-    return {
+    message = {
         "message_id": text(turn.get("record_id")) or text(turn.get("id")),
         "role": "participant",
         "content": text(turn.get("text")),
         "timestamp": text_or_none(turn.get("timestamp")),
         "metadata": clean_metadata(metadata),
     }
+    if speaker:
+        message["speaker"] = speaker
+    return message
 
 
 def _question_from_record(record: dict[str, Any]) -> dict[str, Any]:

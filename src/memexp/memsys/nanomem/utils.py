@@ -20,6 +20,18 @@ def message_role(message: dict[str, Any]) -> str:
     return str(message.get("role") or message.get("speaker") or "").strip().lower()
 
 
+def message_speaker(message: dict[str, Any]) -> str | None:
+    value = message.get("speaker")
+    if value is None:
+        metadata = message.get("metadata")
+        if isinstance(metadata, dict):
+            value = metadata.get("speaker")
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
 def message_text(message: dict[str, Any]) -> str:
     return str(message.get("content") or message.get("text") or "").strip()
 
