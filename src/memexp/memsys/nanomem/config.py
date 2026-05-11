@@ -31,7 +31,6 @@ class RetryConfig:
 class StorageConfig:
     policy: str = "fact"
     chunk_tokens: int = 1024
-    target_roles: tuple[str, ...] = ("user", )
     backend: str = "heuristic"
     llm_model: str | None = None
     llm_base_url: str | None = None
@@ -86,7 +85,6 @@ def config_for_artifact(config: NanoMemConfig) -> dict[str, Any]:
         "storage": {
             "policy": config.storage.policy,
             "chunk_tokens": config.storage.chunk_tokens,
-            "target_roles": config.storage.target_roles,
             "backend": config.storage.backend,
             "llm_model": config.storage.llm_model,
             "llm_max_tokens": config.storage.llm_max_tokens,

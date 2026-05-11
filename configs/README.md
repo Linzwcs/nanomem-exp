@@ -23,5 +23,6 @@ runner. Fill `REPLACE_WITH_*` values directly in a private copy before running:
 Both use:
 
 - fact extraction model: `GPT-oss-120b`
+- QA model: `GPT-oss-120b`
 - evaluation judge model: `GPT-oss-120b`
 - embedding model: `qwen3-0.6b-embedding`

@@ -8,7 +8,12 @@ from typing import Any, Mapping
 from uuid import uuid4
 
 from memexp.adapters import load_unified_dataset
-from memexp.agents import FixedQueryAgent, FixedQueryAgentConfig
+from memexp.agents import (
+    FixedQueryAgent,
+    FixedQueryAgentConfig,
+    ThinkStepByStepAgent,
+    ThinkStepByStepAgentConfig,
+)
 from memexp.core.dataset import Dataset, DatasetItem
 from memexp.evaluators import (
     ContainsEvaluator,
@@ -209,6 +214,8 @@ def _memory_system(spec: ComponentSpec) -> Any:
 def _agent(spec: ComponentSpec) -> Any:
     if spec.name == "fixed_query":
         return FixedQueryAgent(FixedQueryAgentConfig(**spec.config))
+    if spec.name == "think_step_by_step":
+        return ThinkStepByStepAgent(ThinkStepByStepAgentConfig(**spec.config))
     raise ValueError(f"Unsupported agent: {spec.name}")
 
 

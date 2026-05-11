@@ -86,7 +86,7 @@ class RunnerLoopsTest(unittest.TestCase):
         )
         memory_system = NanoMemSystem(
             NanoMemConfig(
-                storage=StorageConfig(backend="heuristic", target_roles=("user",)),
+                storage=StorageConfig(backend="heuristic"),
                 retrieve=RetrieveConfig(top_k=5),
                 render=RenderConfig(policy="timeline_v1", context_tokens=80),
             )
@@ -148,7 +148,7 @@ class RunnerLoopsTest(unittest.TestCase):
         )
         memory_system = NanoMemSystem(
             NanoMemConfig(
-                storage=StorageConfig(backend="heuristic", target_roles=("user",)),
+                storage=StorageConfig(backend="heuristic"),
                 retrieve=RetrieveConfig(top_k=3),
                 render=RenderConfig(policy="timeline_v1", context_tokens=40),
             )
@@ -221,7 +221,7 @@ class RunnerLoopsTest(unittest.TestCase):
         )
         memory_system = NanoMemSystem(
             NanoMemConfig(
-                storage=StorageConfig(backend="heuristic", target_roles=("user",)),
+                storage=StorageConfig(backend="heuristic"),
                 retrieve=RetrieveConfig(top_k=3),
                 render=RenderConfig(policy="timeline_v1", context_tokens=40),
             )
@@ -293,7 +293,7 @@ class RunnerLoopsTest(unittest.TestCase):
         )
         memory_system = NanoMemSystem(
             NanoMemConfig(
-                storage=StorageConfig(backend="heuristic", target_roles=("user",)),
+                storage=StorageConfig(backend="heuristic"),
                 retrieve=RetrieveConfig(top_k=3),
                 render=RenderConfig(policy="timeline_v1", context_tokens=40),
             )

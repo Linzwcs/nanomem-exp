@@ -82,9 +82,12 @@ def _message_from_turn(
     turn_index: int,
     timestamp: str | None,
 ) -> dict[str, Any]:
+    role = text(turn.get("role")) or "unknown"
+    speaker = text(turn.get("speaker")) or role
     return {
         "message_id": f"{session_id}:m{turn_index}",
-        "role": text(turn.get("role")) or "unknown",
+        "role": role,
+        "speaker": speaker,
         "content": text(turn.get("content")),
         "timestamp": timestamp,
         "metadata": {

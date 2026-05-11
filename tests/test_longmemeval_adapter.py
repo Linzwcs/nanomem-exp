@@ -65,6 +65,7 @@ class LongMemEvalAdapterTest(unittest.TestCase):
         message = item["conversations"][0][0]
         self.assertEqual(message["message_id"], "session-1:m1")
         self.assertEqual(message["role"], "user")
+        self.assertEqual(message["speaker"], "user")
         self.assertEqual(message["content"], "Can you help me plan a trip?")
         self.assertEqual(message["timestamp"], "2023/02/15 (Wed) 01:41")
         self.assertEqual(message["metadata"]["session_id"], "session-1")

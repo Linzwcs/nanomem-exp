@@ -61,13 +61,12 @@ class NanoMemFactTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unsupported NanoMem storage policy"):
             make_storage_policy(StorageConfig(policy="unknown_v1"))
 
-    def test_builds_fact_units_from_user_messages(self) -> None:
+    def test_builds_fact_units_from_all_speaker_messages(self) -> None:
         system = NanoMemSystem(
             NanoMemConfig(
                 storage=StorageConfig(
                     backend="heuristic",
                     chunk_tokens=64,
-                    target_roles=("user",),
                 ),
             )
         )
@@ -93,6 +92,7 @@ class NanoMemFactTest(unittest.TestCase):
         self.assertGreaterEqual(len(artifact.units), 2)
         self.assertTrue(all(unit.memory_type == "fact" for unit in artifact.units))
         self.assertTrue(any("Seattle" in unit.text for unit in artifact.units))
+        self.assertTrue(any("Thanks for sharing" in unit.text for unit in artifact.units))
         self.assertTrue(all(unit.source_ids for unit in artifact.units))
         self.assertTrue(all(unit.available_at == "2024-01-01" for unit in artifact.units))
         self.assertTrue(all(unit.source_time_start == "2024-01-01" for unit in artifact.units))
@@ -115,7 +115,6 @@ class NanoMemFactTest(unittest.TestCase):
             NanoMemConfig(
                 storage=StorageConfig(
                     backend="heuristic",
-                    target_roles=("user",),
                 ),
                 retrieve=RetrieveConfig(
                     policy="dense_cosine_v1",
@@ -173,7 +172,6 @@ class NanoMemFactTest(unittest.TestCase):
                 NanoMemConfig(
                     storage=StorageConfig(
                         backend="heuristic",
-                        target_roles=("user",),
                     ),
                     retrieve=RetrieveConfig(
                         embedding_backend="openai_compatible",
@@ -242,7 +240,6 @@ class NanoMemFactTest(unittest.TestCase):
                 NanoMemConfig(
                     storage=StorageConfig(
                         backend="heuristic",
-                        target_roles=("user",),
                     ),
                     retrieve=RetrieveConfig(
                         embedding_backend="openai_compatible",
@@ -313,7 +310,6 @@ class NanoMemFactTest(unittest.TestCase):
                 NanoMemConfig(
                     storage=StorageConfig(
                         backend="heuristic",
-                        target_roles=("user",),
                     ),
                     retrieve=RetrieveConfig(
                         embedding_backend="openai_compatible",
@@ -555,7 +551,6 @@ class NanoMemFactTest(unittest.TestCase):
                 NanoMemConfig(
                     storage=StorageConfig(
                         backend="llm",
-                        target_roles=("participant",),
                         llm_model="fake-extractor",
                         llm_api_key="test-key",
                     )
@@ -575,10 +570,12 @@ class NanoMemFactTest(unittest.TestCase):
             )
 
         self.assertEqual(len(prompts), 1)
+        self.assertIn("<speaker_reference>\nAva said\n</speaker_reference>", prompts[0])
         self.assertIn("speaker: Ava", prompts[0])
         self.assertIn("content: I moved to Seattle.", prompts[0])
+        self.assertNotIn("<speaker_reference>\nparticipant said", prompts[0])
         self.assertNotIn("participant: I moved to Seattle.", prompts[0])
-        self.assertEqual(artifact.units[0].metadata["target_role"], "participant")
+        self.assertNotIn("target_role", artifact.units[0].metadata)
         self.assertEqual(artifact.units[0].metadata["target_speakers"], ("Ava",))
 
     def test_llm_storage_retries_transient_generation_failures(self) -> None:
@@ -712,7 +709,6 @@ class NanoMemFactTest(unittest.TestCase):
             NanoMemConfig(
                 storage=StorageConfig(
                     backend="heuristic",
-                    target_roles=("user",),
                 ),
                 retrieve=RetrieveConfig(top_k=10),
                 render=RenderConfig(
@@ -768,7 +764,6 @@ class NanoMemFactTest(unittest.TestCase):
             NanoMemConfig(
                 storage=StorageConfig(
                     backend="heuristic",
-                    target_roles=("user",),
                 ),
                 retrieve=RetrieveConfig(top_k=10),
                 render=RenderConfig(

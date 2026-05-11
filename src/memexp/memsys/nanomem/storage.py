@@ -170,6 +170,32 @@ def _speaker_reference_for_message(
     return fallback
 
 
+def _speaker_reference_for_messages(
+    messages: list[dict[str, Any]],
+    *,
+    fallback_speaker: str,
+) -> str:
+    speakers = tuple(
+        dict.fromkeys(speaker for message in messages
+                      if (speaker := message_speaker(message))))
+    if speakers:
+        return "; ".join(f"{speaker} said" for speaker in speakers)
+    return f"{fallback_speaker} said"
+
+
+def _message_speaker_key(message: dict[str, Any]) -> str:
+    return message_speaker(message) or message_role(message) or "unknown"
+
+
+def _messages_by_speaker(
+    messages: list[dict[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for message in messages:
+        grouped.setdefault(_message_speaker_key(message), []).append(message)
+    return grouped
+
+
 def _extract_json_object(text: str) -> dict[str, Any] | None:
     value = (text or "").strip()
     if not value:
@@ -348,20 +374,21 @@ class FactStoragePolicy(StoragePolicy):
             message_timestamp(message) for message in chunk)
         source_time_start = min_timestamp(source_timestamps)
         source_time_end = max_timestamp(source_timestamps)
-        for role in self.config.target_roles:
-            target_messages = [
-                message for message in chunk if message_role(message) == role
-            ]
+        for speaker, target_messages in _messages_by_speaker(chunk).items():
             if not target_messages:
                 continue
             target_speakers = tuple(
-                dict.fromkeys(speaker for message in target_messages
-                              if (speaker := message_speaker(message))))
+                dict.fromkeys(_message_speaker_key(message)
+                              for message in target_messages))
             available_at = source_time_end or message_timestamp(
                 target_messages[-1])
-            speaker_reference = f"{role} said"
+            speaker_reference = _speaker_reference_for_messages(
+                target_messages,
+                fallback_speaker=speaker,
+            )
+            speaker_id = stable_hash(speaker, length=8)
             generation_call_id = (
-                f"{scope.scope_id}:c{conversation_index}:chunk_{chunk_index}:{role}"
+                f"{scope.scope_id}:c{conversation_index}:chunk_{chunk_index}:speaker_{speaker_id}"
             )
             extraction = self._extract_facts(
                 chunk=chunk,
@@ -379,7 +406,7 @@ class FactStoragePolicy(StoragePolicy):
                     str(tag).strip() for tag in fact.get("tags", [])
                     if str(tag).strip())
                 unit_id = (f"{scope.scope_id}:c{conversation_index}:"
-                           f"fact_{chunk_index}_{fact_index}:{role}")
+                           f"fact_{chunk_index}_{fact_index}:speaker_{speaker_id}")
                 source_ids = tuple(
                     message_source_id(
                         message,
@@ -400,7 +427,6 @@ class FactStoragePolicy(StoragePolicy):
                             "scope_id": scope.scope_id,
                             "conversation_index": conversation_index,
                             "chunk_index": chunk_index,
-                            "target_role": role,
                             "target_speakers": target_speakers,
                             "available_at": available_at,
                             "source_time_range": {

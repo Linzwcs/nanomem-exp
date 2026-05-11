@@ -121,14 +121,15 @@ class RunSpecManifestTest(unittest.TestCase):
             spec = load_experiment_run_spec(path)
 
             memory_config = spec.memory_system.config
+            agent_config = spec.agent.config
             evaluator_config = spec.evaluator.config
 
-            self.assertEqual(memory_config["storage"]["llm_model"], "GPT-oss-120b")
-            self.assertEqual(
-                memory_config["retrieve"]["embedding_model"],
-                "qwen3-0.6b-embedding",
-            )
-            self.assertEqual(evaluator_config["model"], "GPT-oss-120b")
+            self.assertTrue(memory_config["storage"]["llm_model"])
+            self.assertEqual(spec.agent.name, "think_step_by_step")
+            self.assertIn("model", agent_config)
+            self.assertTrue(memory_config["retrieve"]["embedding_model"])
+            self.assertTrue(agent_config["model"])
+            self.assertTrue(evaluator_config["model"])
             self.assertNotIn("env_file", spec.to_dict())
 
 

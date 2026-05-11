@@ -13,9 +13,6 @@
         "policy": "fact",
         "backend": "llm",
         "chunk_tokens": 1024,
-        "target_roles": [
-          "user"
-        ],
         "llm_model": "GPT-oss-120b",
         "llm_base_url": "REPLACE_WITH_LLM_BASE_URL",
         "llm_api_key": "REPLACE_WITH_LLM_API_KEY",
@@ -61,7 +58,15 @@
     }
   },
   "agent": {
-    "name": "fixed_query"
+    "name": "think_step_by_step",
+    "config": {
+      "model": "GPT-oss-120b",
+      "base_url": "REPLACE_WITH_QA_BASE_URL",
+      "api_key": "REPLACE_WITH_QA_API_KEY",
+      "max_tokens": 8192,
+      "temperature": 0.0,
+      "include_question_time": true
+    }
   },
   "evaluator": {
     "name": "dataset_prompt_judge",
