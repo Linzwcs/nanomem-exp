@@ -6,15 +6,15 @@ import math
 import os
 from pathlib import Path
 import re
-from threading import Lock
+import sqlite3
+import struct
 from typing import Any, Protocol
-from uuid import uuid4
 
 from memexp.core.contracts import MemoryUnit, RankedMemoryUnit
 from memexp.memsys.nanomem.config import RetrieveConfig, resolved_embedding_model
 
 
-EMBEDDING_CACHE_SCHEMA_VERSION = "nanomem.embedding_cache.v1"
+EMBEDDING_CACHE_SCHEMA_VERSION = "nanomem.embedding_cache.sqlite.v1"
 
 
 def _tokens(text: str) -> list[str]:
@@ -138,71 +138,134 @@ class OpenAICompatibleEmbeddingBackend:
         return self.client
 
 
-class FileEmbeddingVectorCache:
-    """Persistent text-hash keyed embedding cache; raw texts are never stored."""
+class SqliteEmbeddingShardCache:
+    """Artifact-sharded embedding cache; raw texts are never stored."""
 
     def __init__(self, root: str | os.PathLike[str]) -> None:
         self.root = Path(root)
-        self._lock = Lock()
 
-    def load(
+    def load_many(
         self,
         *,
         identity: dict[str, Any],
-        text: str,
-    ) -> tuple[float, ...] | None:
-        key = _embedding_cache_key(identity, text)
-        path = self._path(key)
+        shard_id: str,
+        texts: list[str],
+    ) -> list[tuple[float, ...] | None]:
+        if not texts:
+            return []
+        path = self._path(identity=identity, shard_id=shard_id)
         if not path.exists():
-            return None
+            return [None] * len(texts)
+        keys = [_text_hash(text) for text in texts]
         try:
-            with self._lock:
-                with path.open("r", encoding="utf-8") as handle:
-                    payload = json.load(handle)
-        except (OSError, json.JSONDecodeError):
-            return None
-        if payload.get("schema_version") != EMBEDDING_CACHE_SCHEMA_VERSION:
-            return None
-        if payload.get("key") != key:
-            return None
-        if payload.get("identity") != identity:
-            return None
-        if payload.get("text_hash") != _text_hash(text):
-            return None
-        vector = payload.get("vector")
-        if not isinstance(vector, list):
-            return None
-        try:
-            return tuple(float(value) for value in vector)
-        except (TypeError, ValueError):
-            return None
+            with sqlite3.connect(path, timeout=30) as connection:
+                if not self._valid_meta(connection, identity=identity):
+                    return [None] * len(texts)
+                rows = connection.execute(
+                    f"""
+                    SELECT text_hash, dimensions, vector
+                    FROM embeddings
+                    WHERE text_hash IN ({",".join("?" for _ in keys)})
+                    """,
+                    keys,
+                ).fetchall()
+        except sqlite3.Error:
+            return [None] * len(texts)
 
-    def store(
+        vectors_by_key: dict[str, tuple[float, ...]] = {}
+        for key, dimensions, blob in rows:
+            vector = _vector_from_blob(blob, int(dimensions))
+            if vector is not None:
+                vectors_by_key[str(key)] = vector
+        return [vectors_by_key.get(key) for key in keys]
+
+    def store_many(
         self,
         *,
         identity: dict[str, Any],
-        text: str,
-        vector: tuple[float, ...],
+        shard_id: str,
+        items: list[tuple[str, tuple[float, ...]]],
     ) -> None:
-        key = _embedding_cache_key(identity, text)
-        path = self._path(key)
-        payload = {
-            "schema_version": EMBEDDING_CACHE_SCHEMA_VERSION,
-            "key": key,
-            "identity": identity,
-            "text_hash": _text_hash(text),
-            "vector": list(vector),
-        }
-        with self._lock:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            tmp_path = path.with_name(f"{path.name}.{uuid4().hex}.tmp")
-            with tmp_path.open("w", encoding="utf-8") as handle:
-                json.dump(payload, handle, ensure_ascii=False, sort_keys=True)
-                handle.write("\n")
-            tmp_path.replace(path)
+        if not items:
+            return
+        path = self._path(identity=identity, shard_id=shard_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        rows = [
+            (_text_hash(text), len(vector), _vector_to_blob(vector))
+            for text, vector in items
+        ]
+        try:
+            with sqlite3.connect(path, timeout=30) as connection:
+                self._ensure_schema(connection, identity=identity)
+                connection.executemany(
+                    """
+                    INSERT OR REPLACE INTO embeddings
+                    (text_hash, dimensions, vector)
+                    VALUES (?, ?, ?)
+                    """,
+                    rows,
+                )
+                connection.commit()
+        except sqlite3.Error:
+            return
 
-    def _path(self, key: str) -> Path:
-        return self.root / key[:2] / f"{key}.json"
+    def path_for(self, *, identity: dict[str, Any], shard_id: str) -> Path:
+        return self._path(identity=identity, shard_id=shard_id)
+
+    def _path(self, *, identity: dict[str, Any], shard_id: str) -> Path:
+        key = _embedding_cache_shard_key(identity=identity, shard_id=shard_id)
+        return self.root / key[:2] / f"{key}.sqlite3"
+
+    def _ensure_schema(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        identity: dict[str, Any],
+    ) -> None:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS embeddings (
+                text_hash TEXT PRIMARY KEY,
+                dimensions INTEGER NOT NULL,
+                vector BLOB NOT NULL
+            )
+            """
+        )
+        values = {
+            "schema_version": EMBEDDING_CACHE_SCHEMA_VERSION,
+            "identity_hash": _identity_hash(identity),
+            "namespace": str(identity.get("namespace") or ""),
+            "backend": str(identity.get("backend") or ""),
+            "model": str(identity.get("model") or ""),
+        }
+        connection.executemany(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+            values.items(),
+        )
+
+    def _valid_meta(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        identity: dict[str, Any],
+    ) -> bool:
+        try:
+            rows = connection.execute("SELECT key, value FROM meta").fetchall()
+        except sqlite3.Error:
+            return False
+        meta = {str(key): str(value) for key, value in rows}
+        return (
+            meta.get("schema_version") == EMBEDDING_CACHE_SCHEMA_VERSION
+            and meta.get("identity_hash") == _identity_hash(identity)
+        )
 
 
 class CachedDenseEmbeddingBackend:
@@ -210,7 +273,7 @@ class CachedDenseEmbeddingBackend:
         self,
         *,
         backend: DenseEmbeddingBackend,
-        cache: FileEmbeddingVectorCache,
+        cache: SqliteEmbeddingShardCache,
         identity: dict[str, Any],
     ) -> None:
         self.backend = backend
@@ -219,14 +282,23 @@ class CachedDenseEmbeddingBackend:
         self.name = backend.name
         self.last_stats: dict[str, Any] = {}
 
-    def embed(self, texts: list[str]) -> list[tuple[float, ...]]:
+    def embed(
+        self,
+        texts: list[str],
+        *,
+        shard_id: str = "global",
+    ) -> list[tuple[float, ...]]:
         vectors: list[tuple[float, ...] | None] = [None] * len(texts)
         missing_indices_by_text: dict[str, list[int]] = {}
         cache_hits = 0
         batch_hits = 0
 
-        for index, text in enumerate(texts):
-            cached = self.cache.load(identity=self.identity, text=text)
+        cached_vectors = self.cache.load_many(
+            identity=self.identity,
+            shard_id=shard_id,
+            texts=texts,
+        )
+        for index, (text, cached) in enumerate(zip(texts, cached_vectors, strict=True)):
             if cached is not None:
                 vectors[index] = cached
                 cache_hits += 1
@@ -239,8 +311,12 @@ class CachedDenseEmbeddingBackend:
         writes = 0
         if missing_texts:
             embedded = self.backend.embed(missing_texts)
+            self.cache.store_many(
+                identity=self.identity,
+                shard_id=shard_id,
+                items=list(zip(missing_texts, embedded, strict=True)),
+            )
             for text, vector in zip(missing_texts, embedded, strict=True):
-                self.cache.store(identity=self.identity, text=text, vector=vector)
                 writes += 1
                 for index in missing_indices_by_text[text]:
                     vectors[index] = vector
@@ -249,6 +325,12 @@ class CachedDenseEmbeddingBackend:
             "enabled": True,
             "policy": EMBEDDING_CACHE_SCHEMA_VERSION,
             "namespace": self.identity["namespace"],
+            "shard_id": shard_id,
+            "cache_file": str(self.cache.path_for(
+                identity=self.identity,
+                shard_id=shard_id,
+            )),
+            "file_format": "sqlite3",
             "hits": cache_hits,
             "misses": len(missing_texts),
             "batch_hits": batch_hits,
@@ -286,7 +368,7 @@ def _maybe_cached_backend(
         return backend
     return CachedDenseEmbeddingBackend(
         backend=backend,
-        cache=FileEmbeddingVectorCache(config.embedding_cache_path),
+        cache=SqliteEmbeddingShardCache(config.embedding_cache_path),
         identity=_embedding_cache_identity(config, backend),
     )
 
@@ -317,10 +399,14 @@ def _embedding_cache_identity(
     }
 
 
-def _embedding_cache_key(identity: dict[str, Any], text: str) -> str:
+def _embedding_cache_shard_key(
+    *,
+    identity: dict[str, Any],
+    shard_id: str,
+) -> str:
     payload = {
-        "identity": identity,
-        "text_hash": _text_hash(text),
+        "identity_hash": _identity_hash(identity),
+        "shard_id": shard_id,
     }
     return hashlib.sha256(
         json.dumps(
@@ -332,8 +418,36 @@ def _embedding_cache_key(identity: dict[str, Any], text: str) -> str:
     ).hexdigest()
 
 
+def _identity_hash(identity: dict[str, Any]) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            identity,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+
 def _text_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _vector_to_blob(vector: tuple[float, ...]) -> bytes:
+    if not vector:
+        return b""
+    return struct.pack(f"<{len(vector)}d", *vector)
+
+
+def _vector_from_blob(blob: bytes, dimensions: int) -> tuple[float, ...] | None:
+    if dimensions < 0 or len(blob) != dimensions * 8:
+        return None
+    if dimensions == 0:
+        return ()
+    try:
+        return tuple(float(value) for value in struct.unpack(f"<{dimensions}d", blob))
+    except struct.error:
+        return None
 
 
 class RetrievePolicy:
@@ -349,6 +463,8 @@ class RetrievePolicy:
     def warm_storage_embeddings(
         self,
         units: tuple[MemoryUnit, ...],
+        *,
+        cache_shard_id: str = "global",
     ) -> dict[str, Any]:
         texts = self.storage_texts(units)
         if not texts:
@@ -366,7 +482,7 @@ class RetrievePolicy:
                 "reason": "missing_embedding_cache_path",
                 "text_count": len(texts),
             }
-        self.backend.embed(texts)
+        self._embed(texts, cache_shard_id=cache_shard_id)
         return {
             **getattr(self.backend, "last_stats", {}),
             "scope": "storage",
@@ -378,12 +494,16 @@ class RetrievePolicy:
         query: str | dict[str, Any],
         *,
         top_k: int | None = None,
+        cache_shard_id: str = "global",
     ) -> tuple[dict[str, Any], tuple[RankedMemoryUnit, ...]]:
         query_payload = build_query(query)
         query_text = str(query_payload["text"])
         limit = top_k or self.config.top_k
         texts = self.storage_texts(units)
-        embeddings = self.backend.embed([query_text, *texts])
+        embeddings = self._embed(
+            [query_text, *texts],
+            cache_shard_id=cache_shard_id,
+        )
         self.last_stats = {
             "embedding_backend": self.backend.name,
             "embedding_cache": getattr(
@@ -431,3 +551,13 @@ class RetrievePolicy:
         return [
             _unit_text(unit, self.config.retrieval_fields) for unit in units
         ]
+
+    def _embed(
+        self,
+        texts: list[str],
+        *,
+        cache_shard_id: str,
+    ) -> list[tuple[float, ...]]:
+        if isinstance(self.backend, CachedDenseEmbeddingBackend):
+            return self.backend.embed(texts, shard_id=cache_shard_id)
+        return self.backend.embed(texts)

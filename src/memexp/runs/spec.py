@@ -35,6 +35,8 @@ from memexp.runs.execution import RunExecutionConfig
 from memexp.runs.experiment import ExperimentRunResult, ExperimentRunner
 from memexp.runs.logging import JsonlRunLogger
 from memexp.runs.manifest import write_run_manifest
+from memexp.runs.records import JsonlRecordSink
+from memexp.runs.serialization import answer_record_to_dict
 
 
 @dataclass(frozen=True)
@@ -120,6 +122,8 @@ def execute_experiment_run_spec(spec: ExperimentRunSpec) -> ExperimentRunOutput:
     cache = JsonStageCache(spec.cache_dir) if spec.cache_dir else None
     events_path = run_dir / "events.jsonl"
     logger = JsonlRunLogger(events_path)
+    answers_path = run_dir / "answers.jsonl"
+    answer_record_sink = JsonlRecordSink(answers_path, answer_record_to_dict)
 
     runner = ExperimentRunner(
         _memory_system(spec.memory_system),
@@ -133,6 +137,7 @@ def execute_experiment_run_spec(spec: ExperimentRunSpec) -> ExperimentRunOutput:
         execution=spec.execution,
         logger=logger,
         cache=cache,
+        answer_record_sink=answer_record_sink,
     )
     manifest = write_run_manifest(
         run_dir=run_dir,

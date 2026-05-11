@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from memexp.agents.base import AgentSystem
+from memexp.agents.base import AgentSystem, AnswerRecord
 from memexp.core.dataset import Dataset
 from memexp.evaluators.base import Evaluator
 from memexp.memsys.base import MemorySystem
@@ -49,6 +50,7 @@ class ExperimentRunner:
         execution: RunExecutionConfig | None = None,
         logger: RunLogger | None = None,
         cache: StageCache | None = None,
+        answer_record_sink: Callable[[AnswerRecord], None] | None = None,
     ) -> ExperimentRunResult:
         build = MemoryBuildRunner(self.memory_system).run(
             dataset,
@@ -61,7 +63,14 @@ class ExperimentRunner:
             self.agent,
             top_k=self.top_k,
             context_budget_tokens=self.context_budget_tokens,
-        ).run(dataset, build, execution=execution, logger=logger, cache=cache)
+        ).run(
+            dataset,
+            build,
+            execution=execution,
+            logger=logger,
+            cache=cache,
+            record_sink=answer_record_sink,
+        )
         evaluation = EvaluationRunner(self.evaluator).run(
             dataset,
             answer,

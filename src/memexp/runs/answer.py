@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
@@ -59,6 +60,7 @@ class AnswerRunner:
         execution: RunExecutionConfig | None = None,
         logger: RunLogger | None = None,
         cache: StageCache | None = None,
+        record_sink: Callable[[AnswerRecord], None] | None = None,
     ) -> AnswerRunResult:
         artifacts_by_item_id = _artifact_map(build_result)
         active_logger = logger or NullRunLogger()
@@ -95,7 +97,10 @@ class AnswerRunner:
                             metrics={"cache_key": key},
                         )
                     )
-                    return answer_record_from_dict(cached), True
+                    record = answer_record_from_dict(cached)
+                    if record_sink is not None:
+                        record_sink(record)
+                    return record, True
                 active_logger.emit(
                     RunEvent(
                         stage="answer",
@@ -125,6 +130,8 @@ class AnswerRunner:
                         "agent": self.agent_name,
                     },
                 )
+            if record_sink is not None:
+                record_sink(record)
             return record, False
 
         task_index = 0

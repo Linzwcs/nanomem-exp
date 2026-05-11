@@ -54,6 +54,8 @@ class RetrieveConfig:
     embedding_cache_path: str | None = None
     embedding_cache_namespace: str = "default"
     warm_storage_embeddings: bool = False
+    context_cache_path: str | None = None
+    context_cache_namespace: str = "default"
 
 
 @dataclass(frozen=True)

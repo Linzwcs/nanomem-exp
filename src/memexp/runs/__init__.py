@@ -7,6 +7,7 @@ from memexp.runs.evaluate import EvaluationRunResult, EvaluationRunner
 from memexp.runs.execution import RunExecutionConfig, RunTask, RunTaskBatchResult
 from memexp.runs.experiment import ExperimentRunResult, ExperimentRunner
 from memexp.runs.manifest import write_run_manifest
+from memexp.runs.records import JsonlRecordSink
 from memexp.runs.spec import (
     ComponentSpec,
     DatasetSpec,
@@ -39,6 +40,7 @@ __all__ = [
     "ExperimentRunSpec",
     "JsonStageCache",
     "JsonlRunLogger",
+    "JsonlRecordSink",
     "ListRunLogger",
     "MemoryBuildRunner",
     "NullRunLogger",
