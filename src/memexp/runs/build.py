@@ -64,6 +64,8 @@ class MemoryBuildRunner:
             if cache is not None:
                 cached = cache.load("build", key)
                 if cached is not None:
+                    record = build_record_from_dict(cached, BuildRecord)
+                    _prepare_build_artifact(self.memory_system, record.artifact)
                     active_logger.emit(
                         RunEvent(
                             stage="build",
@@ -72,7 +74,7 @@ class MemoryBuildRunner:
                             metrics={"cache_key": key},
                         )
                     )
-                    return build_record_from_dict(cached, BuildRecord), True
+                    return record, True
                 active_logger.emit(
                     RunEvent(
                         stage="build",
@@ -163,6 +165,15 @@ def _build_task_metrics(result: tuple[BuildRecord, bool]) -> dict[str, Any]:
     metrics = _build_record_metrics(record)
     metrics["cache_hit"] = cache_hit
     return metrics
+
+
+def _prepare_build_artifact(
+    memory_system: MemorySystem,
+    artifact: MemoryArtifact,
+) -> None:
+    prepare = getattr(memory_system, "prepare_build_artifact", None)
+    if callable(prepare):
+        prepare(artifact)
 
 
 def _build_cache_key(dataset: Dataset, item: Any, memory_system: MemorySystem) -> str:

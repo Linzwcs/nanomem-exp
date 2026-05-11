@@ -190,24 +190,29 @@ def build_record_from_dict(payload: dict[str, Any], record_type: type[T]) -> T:
 
 
 def answer_record_to_dict(record: AnswerRecord) -> dict[str, Any]:
+    metadata = _compact_answer_metadata(record.metadata)
     return {
         "item_id": record.item_id,
         "question_id": record.question_id,
         "query": to_jsonable(record.query),
-        "answer": record.answer,
-        "agent_name": record.agent_name,
         "query_time": record.query_time,
+        "ground_truth": to_jsonable(record.metadata.get("ground_truth")),
+        "evidence_ids": list(record.metadata.get("evidence_ids") or ()),
+        "answer": record.answer,
+        "context": _answer_context_text(record),
+        "agent_name": record.agent_name,
         "memory_artifact_id": record.memory_artifact_id,
-        "memory_reads": [
-            memory_read_result_to_dict(read)
-            for read in record.memory_reads
-        ],
         "stats": to_jsonable(record.stats),
-        "metadata": to_jsonable(record.metadata),
+        "metadata": to_jsonable(metadata),
     }
 
 
 def answer_record_from_dict(payload: dict[str, Any]) -> AnswerRecord:
+    metadata = dict(payload.get("metadata") or {})
+    if "ground_truth" in payload:
+        metadata["ground_truth"] = payload.get("ground_truth")
+    if payload.get("evidence_ids"):
+        metadata["evidence_ids"] = tuple(payload.get("evidence_ids") or ())
     return AnswerRecord(
         item_id=str(payload["item_id"]),
         question_id=str(payload["question_id"]),
@@ -216,12 +221,66 @@ def answer_record_from_dict(payload: dict[str, Any]) -> AnswerRecord:
         agent_name=str(payload["agent_name"]),
         query_time=payload.get("query_time"),
         memory_artifact_id=payload.get("memory_artifact_id"),
-        memory_reads=tuple(
+        memory_reads=_answer_memory_reads_from_dict(payload),
+        stats=dict(payload.get("stats") or {}),
+        metadata=metadata,
+    )
+
+
+def _answer_context_text(record: AnswerRecord) -> str:
+    return "\n\n".join(
+        read.context.text
+        for read in record.memory_reads
+        if read.context.text
+    )
+
+
+def _compact_answer_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    omitted = {
+        "evidence_ids",
+        "ground_truth",
+        "ground_truth_metadata",
+        "prompt",
+    }
+    compact = {
+        key: value
+        for key, value in metadata.items()
+        if key not in omitted
+    }
+    if metadata.get("ground_truth_metadata"):
+        compact["ground_truth_metadata"] = metadata["ground_truth_metadata"]
+    return compact
+
+
+def _answer_memory_reads_from_dict(
+    payload: dict[str, Any],
+) -> tuple[MemoryReadResult, ...]:
+    if "memory_reads" in payload:
+        return tuple(
             memory_read_result_from_dict(read)
             for read in payload.get("memory_reads") or ()
+        )
+    if "context" not in payload:
+        return ()
+    stats = dict(payload.get("stats") or {})
+    context = PackedContext(
+        text=str(payload.get("context") or ""),
+        token_count=int(stats.get("context_tokens") or 0),
+        block_count=int(stats.get("context_blocks") or 0),
+    )
+    return (
+        MemoryReadResult(
+            request=MemoryReadRequest(
+                query=payload.get("query"),
+                query_id=payload.get("question_id"),
+                query_time=payload.get("query_time"),
+            ),
+            ranked_units=(),
+            context=context,
+            stats={
+                "artifact_id": payload.get("memory_artifact_id"),
+            },
         ),
-        stats=dict(payload.get("stats") or {}),
-        metadata=dict(payload.get("metadata") or {}),
     )
 
 

@@ -51,7 +51,7 @@ class NanoMemSystem:
             config=self.config,
             units=units,
         )
-        return MemoryArtifact(
+        artifact = MemoryArtifact(
             artifact_id=artifact_id,
             system_name=self.name,
             scope=scope,
@@ -62,6 +62,20 @@ class NanoMemSystem:
                 "storage_token_stats": storage_token_stats(conversations, units),
             },
         )
+        self.prepare_build_artifact(artifact)
+        return artifact
+
+    def prepare_build_artifact(self, artifact: MemoryArtifact) -> dict[str, Any]:
+        if artifact.system_name != self.name:
+            raise ValueError(
+                f"NanoMemSystem cannot prepare artifact from system={artifact.system_name}"
+            )
+        return {
+            "storage_embedding_cache": _warm_storage_embeddings_for_artifact(
+                artifact=artifact,
+                config=self.config,
+            )
+        }
 
     def load(self, artifact: MemoryArtifact) -> "NanoMemRuntime":
         if artifact.system_name != self.name:
@@ -215,15 +229,10 @@ class NanoMemRuntime:
         }
 
     def _warm_storage_embeddings(self) -> dict[str, Any]:
-        if not self.config.retrieve.warm_storage_embeddings:
-            return {
-                "enabled": False,
-                "reason": "disabled",
-                "text_count": len(self.artifact.units),
-            }
-        return self.retrieve_policy.warm_storage_embeddings(
-            self.artifact.units,
-            cache_shard_id=self.artifact.artifact_id,
+        return _warm_storage_embeddings_for_artifact(
+            artifact=self.artifact,
+            config=self.config,
+            retrieve_policy=self.retrieve_policy,
         )
 
     def _snapshot_units(self,
@@ -239,3 +248,22 @@ def _unit_available_at(unit: MemoryUnit, query_time: str) -> bool:
     if not available_at:
         return False
     return timestamp_lte(available_at, query_time)
+
+
+def _warm_storage_embeddings_for_artifact(
+    *,
+    artifact: MemoryArtifact,
+    config: NanoMemConfig,
+    retrieve_policy: RetrievePolicy | None = None,
+) -> dict[str, Any]:
+    if not config.retrieve.warm_storage_embeddings:
+        return {
+            "enabled": False,
+            "reason": "disabled",
+            "text_count": len(artifact.units),
+        }
+    policy = retrieve_policy or RetrievePolicy(config.retrieve)
+    return policy.warm_storage_embeddings(
+        artifact.units,
+        cache_shard_id=artifact.artifact_id,
+    )

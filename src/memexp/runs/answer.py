@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Mapping
 
 from memexp.agents.base import AgentSystem, AnswerRecord
 from memexp.core.contracts import MemoryArtifact
-from memexp.core.dataset import Dataset
+from memexp.core.dataset import Dataset, DatasetQuestion
 from memexp.memsys.base import MemorySystem
 from memexp.runs.build import BuildRunResult
 from memexp.runs.cache import (
@@ -98,6 +98,7 @@ class AnswerRunner:
                         )
                     )
                     record = answer_record_from_dict(cached)
+                    record = _answer_record_with_label(record, question)
                     if record_sink is not None:
                         record_sink(record)
                     return record, True
@@ -119,6 +120,7 @@ class AnswerRunner:
                 top_k=self.top_k,
                 context_budget_tokens=self.context_budget_tokens,
             )
+            record = _answer_record_with_label(record, question)
             if cache is not None:
                 cache.store(
                     "answer",
@@ -211,6 +213,21 @@ def _answer_task_metrics(result: tuple[AnswerRecord, bool]) -> dict[str, Any]:
     metrics = _answer_record_metrics(record)
     metrics["cache_hit"] = cache_hit
     return metrics
+
+
+def _answer_record_with_label(
+    record: AnswerRecord,
+    question: DatasetQuestion,
+) -> AnswerRecord:
+    if question.label is None:
+        return record
+    metadata = dict(record.metadata)
+    metadata["ground_truth"] = question.label.reference_answer
+    if question.label.evidence_ids:
+        metadata["evidence_ids"] = tuple(question.label.evidence_ids)
+    if question.label.metadata:
+        metadata["ground_truth_metadata"] = dict(question.label.metadata)
+    return replace(record, metadata=metadata)
 
 
 def _answer_cache_key(
