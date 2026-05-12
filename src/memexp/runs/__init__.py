@@ -4,7 +4,12 @@ from memexp.runs.answer import AnswerRunResult, AnswerRunner
 from memexp.runs.build import BuildRecord, BuildRunResult, MemoryBuildRunner
 from memexp.runs.cache import JsonStageCache, StageCache, cache_key, object_cache_spec
 from memexp.runs.evaluate import EvaluationRunResult, EvaluationRunner
-from memexp.runs.execution import RunExecutionConfig, RunTask, RunTaskBatchResult
+from memexp.runs.execution import (
+    RunExecutionConfig,
+    RunTask,
+    RunTaskBatchResult,
+    StageExecutionConfig,
+)
 from memexp.runs.experiment import ExperimentRunResult, ExperimentRunner
 from memexp.runs.manifest import write_run_manifest
 from memexp.runs.records import JsonlRecordSink
@@ -50,6 +55,7 @@ __all__ = [
     "RunTask",
     "RunTaskBatchResult",
     "StageCache",
+    "StageExecutionConfig",
     "TerminalRunLogger",
     "cache_key",
     "execute_experiment_run_spec",

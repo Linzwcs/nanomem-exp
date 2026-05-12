@@ -241,6 +241,7 @@ def _compact_answer_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
         "ground_truth",
         "ground_truth_metadata",
         "prompt",
+        "raw_response",
     }
     compact = {
         key: value

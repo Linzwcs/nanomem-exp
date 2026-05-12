@@ -9,6 +9,7 @@ from memexp.agents import (
     THINK_STEP_BY_STEP_PROMPT,
     ThinkStepByStepAgent,
     ThinkStepByStepAgentConfig,
+    extract_final_answer,
     render_think_step_by_step_prompt,
 )
 from memexp.adapters import (
@@ -87,6 +88,7 @@ from memexp.runs import (
     RunTask,
     RunTaskBatchResult,
     StageCache,
+    StageExecutionConfig,
     TerminalRunLogger,
     cache_key,
     execute_experiment_run_spec,
@@ -156,6 +158,7 @@ __all__ = [
     "RunTaskBatchResult",
     "SCHEMA_VERSION",
     "StageCache",
+    "StageExecutionConfig",
     "NullRunLogger",
     "StorageConfig",
     "THINK_STEP_BY_STEP_PROMPT",
@@ -165,6 +168,7 @@ __all__ = [
     "cache_key",
     "execute_experiment_run_spec",
     "experiment_report_row",
+    "extract_final_answer",
     "load_experiment_run_spec",
     "load_unified_dataset",
     "longmemeval_prompt",

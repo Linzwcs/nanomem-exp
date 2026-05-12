@@ -12,7 +12,7 @@ from memexp.runs.answer import AnswerRunResult, AnswerRunner
 from memexp.runs.build import BuildRunResult, MemoryBuildRunner
 from memexp.runs.cache import StageCache
 from memexp.runs.evaluate import EvaluationRunResult, EvaluationRunner
-from memexp.runs.execution import RunExecutionConfig
+from memexp.runs.execution import RunExecutionConfig, StageExecutionConfig
 from memexp.runs.logging import RunLogger
 
 
@@ -48,13 +48,14 @@ class ExperimentRunner:
         dataset: Dataset,
         *,
         execution: RunExecutionConfig | None = None,
+        stage_execution: StageExecutionConfig | None = None,
         logger: RunLogger | None = None,
         cache: StageCache | None = None,
         answer_record_sink: Callable[[AnswerRecord], None] | None = None,
     ) -> ExperimentRunResult:
         build = MemoryBuildRunner(self.memory_system).run(
             dataset,
-            execution=execution,
+            execution=stage_execution.build if stage_execution else execution,
             logger=logger,
             cache=cache,
         )
@@ -66,7 +67,7 @@ class ExperimentRunner:
         ).run(
             dataset,
             build,
-            execution=execution,
+            execution=stage_execution.answer if stage_execution else execution,
             logger=logger,
             cache=cache,
             record_sink=answer_record_sink,
@@ -74,7 +75,7 @@ class ExperimentRunner:
         evaluation = EvaluationRunner(self.evaluator).run(
             dataset,
             answer,
-            execution=execution,
+            execution=stage_execution.evaluate if stage_execution else execution,
             logger=logger,
             cache=cache,
         )

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from memexp.runs.logging import NullRunLogger, RunEvent, RunLogger
@@ -12,6 +12,13 @@ class RunExecutionConfig:
     max_workers: int = 1
     fail_fast: bool = True
     preserve_order: bool = True
+
+
+@dataclass(frozen=True)
+class StageExecutionConfig:
+    build: RunExecutionConfig = field(default_factory=RunExecutionConfig)
+    answer: RunExecutionConfig = field(default_factory=RunExecutionConfig)
+    evaluate: RunExecutionConfig = field(default_factory=RunExecutionConfig)
 
 
 @dataclass(frozen=True)

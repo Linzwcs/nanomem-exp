@@ -36,7 +36,7 @@ from memexp.memsys.nanomem import (
     StorageConfig,
 )
 from memexp.runs.cache import JsonStageCache
-from memexp.runs.execution import RunExecutionConfig
+from memexp.runs.execution import RunExecutionConfig, StageExecutionConfig
 from memexp.runs.experiment import ExperimentRunResult, ExperimentRunner
 from memexp.runs.logging import JsonlRunLogger
 from memexp.runs.manifest import write_run_manifest
@@ -76,9 +76,11 @@ class ExperimentRunSpec:
     top_k: int | None = None
     context_budget_tokens: int | None = None
     execution: RunExecutionConfig = field(default_factory=RunExecutionConfig)
+    stage_execution: StageExecutionConfig | None = None
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> "ExperimentRunSpec":
+        execution = _execution_config(payload.get("execution") or {})
         return cls(
             run_id=_optional_text(payload.get("run_id")),
             output_dir=str(payload.get("output_dir") or "runs"),
@@ -95,7 +97,11 @@ class ExperimentRunSpec:
             ),
             top_k=payload.get("top_k"),
             context_budget_tokens=payload.get("context_budget_tokens"),
-            execution=_execution_config(payload.get("execution") or {}),
+            execution=execution,
+            stage_execution=_stage_execution_config(
+                payload.get("stage_execution"),
+                fallback=execution,
+            ),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -140,6 +146,7 @@ def execute_experiment_run_spec(spec: ExperimentRunSpec) -> ExperimentRunOutput:
     result = runner.run(
         dataset,
         execution=spec.execution,
+        stage_execution=spec.stage_execution,
         logger=logger,
         cache=cache,
         answer_record_sink=answer_record_sink,
@@ -271,12 +278,69 @@ def _component_spec(value: Any, *, default_name: str) -> ComponentSpec:
     )
 
 
-def _execution_config(payload: Mapping[str, Any]) -> RunExecutionConfig:
+def _execution_config(
+    payload: Mapping[str, Any],
+    *,
+    fallback: RunExecutionConfig | None = None,
+) -> RunExecutionConfig:
     return RunExecutionConfig(
-        max_workers=int(payload.get("max_workers") or 1),
-        fail_fast=bool(payload.get("fail_fast", True)),
-        preserve_order=bool(payload.get("preserve_order", True)),
+        max_workers=int(
+            payload.get(
+                "max_workers",
+                fallback.max_workers if fallback else 1,
+            )
+        ),
+        fail_fast=bool(
+            payload.get(
+                "fail_fast",
+                fallback.fail_fast if fallback else True,
+            )
+        ),
+        preserve_order=bool(
+            payload.get(
+                "preserve_order",
+                fallback.preserve_order if fallback else True,
+            )
+        ),
     )
+
+
+def _stage_execution_config(
+    payload: Any,
+    *,
+    fallback: RunExecutionConfig,
+) -> StageExecutionConfig | None:
+    if payload is None:
+        return None
+    if not isinstance(payload, Mapping):
+        raise ValueError("stage_execution must be an object")
+    return StageExecutionConfig(
+        build=_execution_config(
+            _stage_execution_payload(payload, "build"),
+            fallback=fallback,
+        ),
+        answer=_execution_config(
+            _stage_execution_payload(payload, "answer"),
+            fallback=fallback,
+        ),
+        evaluate=_execution_config(
+            (
+                _stage_execution_payload(payload, "evaluate")
+                or _stage_execution_payload(payload, "evaluation")
+            ),
+            fallback=fallback,
+        ),
+    )
+
+
+def _stage_execution_payload(
+    payload: Mapping[str, Any],
+    key: str,
+) -> Mapping[str, Any]:
+    value = payload.get(key) or {}
+    if not isinstance(value, Mapping):
+        raise ValueError(f"stage_execution.{key} must be an object")
+    return value
 
 
 def _optional_text(value: Any) -> str | None:

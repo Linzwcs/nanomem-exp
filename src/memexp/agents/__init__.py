@@ -6,6 +6,7 @@ from memexp.agents.think_step_by_step import (
     THINK_STEP_BY_STEP_PROMPT,
     ThinkStepByStepAgent,
     ThinkStepByStepAgentConfig,
+    extract_final_answer,
     render_think_step_by_step_prompt,
 )
 
@@ -18,5 +19,6 @@ __all__ = [
     "THINK_STEP_BY_STEP_PROMPT",
     "ThinkStepByStepAgent",
     "ThinkStepByStepAgentConfig",
+    "extract_final_answer",
     "render_think_step_by_step_prompt",
 ]

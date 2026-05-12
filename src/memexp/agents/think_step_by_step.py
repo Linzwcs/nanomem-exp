@@ -2,11 +2,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import re
 from typing import Any
 
 from memexp.agents.base import AnswerRecord, MemoryReader
 from memexp.core.dataset import DatasetQuestion
 
+
+FINAL_ANSWER_PATTERN = re.compile(
+    r"(?:^|\n)\s*(?:#{1,6}\s*)?\*{0,2}FINAL ANSWER\*{0,2}\s*:?\s*",
+    re.IGNORECASE,
+)
 
 THINK_STEP_BY_STEP_PROMPT = """
 You are an intelligent memory assistant tasked with retrieving accurate information from episodic memories.
@@ -141,12 +147,13 @@ class ThinkStepByStepAgent:
             ),
         )
         response, usage = self._complete(prompt)
+        answer = extract_final_answer(response)
         return AnswerRecord(
             item_id=item_id,
             question_id=question.question_id,
             query=question.query,
             query_time=question.query_time,
-            answer=response,
+            answer=answer,
             agent_name=self.name,
             memory_artifact_id=read_result.stats.get("artifact_id"),
             memory_reads=(read_result,),
@@ -157,11 +164,14 @@ class ThinkStepByStepAgent:
                 "context_tokens": read_result.context.token_count,
                 "context_blocks": read_result.context.block_count,
                 "qa_prompt_chars": len(prompt),
+                "qa_response_chars": len(response),
+                "qa_answer_chars": len(answer),
                 "qa_generation_tokens": usage,
             },
             metadata={
                 "prompt_name": "think_step_by_step_v1",
                 "prompt": prompt,
+                "raw_response": response,
             },
         )
 
@@ -237,6 +247,15 @@ def render_think_step_by_step_prompt(
     start = prompt.index("{% if include_question_time %}")
     end = prompt.index("{% endif %}") + len("{% endif %}")
     return prompt[:start] + prompt[end:].lstrip("\n")
+
+
+def extract_final_answer(response: str) -> str:
+    text = str(response or "").strip()
+    matches = list(FINAL_ANSWER_PATTERN.finditer(text))
+    if not matches:
+        return text
+    answer = text[matches[-1].end():].strip()
+    return answer or text
 
 
 def _question_text(query: str | dict[str, Any]) -> str:
