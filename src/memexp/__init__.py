@@ -11,6 +11,7 @@ from memexp.agents import (
     ThinkStepByStepAgentConfig,
     extract_final_answer,
     render_think_step_by_step_prompt,
+    sanitize_response_for_judge,
 )
 from memexp.adapters import (
     SCHEMA_VERSION,
@@ -185,6 +186,7 @@ __all__ = [
     "markdown_report_table",
     "object_cache_spec",
     "render_think_step_by_step_prompt",
+    "sanitize_response_for_judge",
     "stream_json_array",
     "unified_payload_to_dataset",
     "write_report_table",

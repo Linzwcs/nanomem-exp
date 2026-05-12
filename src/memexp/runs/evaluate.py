@@ -4,6 +4,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Iterable
 
 from memexp.agents.base import AnswerRecord
+from memexp.agents.think_step_by_step import sanitize_response_for_judge
 from memexp.core.dataset import Dataset, DatasetQuestion
 from memexp.evaluators.base import EvaluationRecord, Evaluator
 from memexp.runs.answer import AnswerRunResult
@@ -226,6 +227,7 @@ def _record_with_question_details(
         "query": to_jsonable(question.query),
         "query_time": question.query_time,
         "answer": answer.answer,
+        "judge_response": _judge_response(answer),
         "ground_truth": _reference_answer(question),
         "question_type": _question_type(question),
         "question_category": _question_category(question),
@@ -282,6 +284,16 @@ def _reference_answer(question: DatasetQuestion) -> Any:
     if question.label is None:
         return None
     return to_jsonable(question.label.reference_answer)
+
+
+def _judge_response(answer: AnswerRecord) -> str:
+    reasoning = answer.metadata.get("reasoning")
+    if isinstance(reasoning, str) and reasoning.strip():
+        return reasoning.strip()
+    raw_response = answer.metadata.get("raw_response")
+    if isinstance(raw_response, str) and raw_response.strip():
+        return sanitize_response_for_judge(raw_response)
+    return answer.answer
 
 
 def _evaluation_cache_key(

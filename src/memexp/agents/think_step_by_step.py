@@ -8,13 +8,15 @@ from typing import Any
 from memexp.agents.base import AnswerRecord, MemoryReader
 from memexp.core.dataset import DatasetQuestion
 
-
 FINAL_ANSWER_PATTERN = re.compile(
     r"(?:^|\n)\s*(?:[*_]{1,3}\s*)?(?:#{1,6}\s*)?"
     r"(?:[*_]{0,3}\s*)?final\s+answer(?:\s*[*_]{0,3})?"
-    r"\s*[:：]?\s*(?:[*_]{0,3})?\s*",
+    r"\s*[:：]?\s*(?:[*_]{0,3})?\s*", )
+ANSWER_MESSAGE_MARKERS = ("<|message|>", )
+THINK_BLOCK_PATTERN = re.compile(
+    r"<think\b[^>]*>.*?</think>",
+    re.IGNORECASE | re.DOTALL,
 )
-ANSWER_MESSAGE_MARKERS = ("<|message|>",)
 
 THINK_STEP_BY_STEP_PROMPT = """
 You are an intelligent memory assistant tasked with retrieving accurate information from episodic memories.
@@ -34,7 +36,6 @@ It is CRITICAL that you move beyond simple fact extraction and perform logical i
 2. ALWAYS include exact numbers, amounts, prices, percentages, dates, times
 3. PRESERVE frequencies exactly - "every Tuesday and Thursday" not "twice a week"
 4. MAINTAIN all proper nouns and entities as they appear
-5. PRESERVE relative or anchored time expressions as written. Do not convert "the week before 9 June 2023" into an absolute date range unless the question explicitly asks for a calendar-date calculation.
 
 # RESPONSE FORMAT (You MUST follow this structure):
 
@@ -55,14 +56,13 @@ It is CRITICAL that you move beyond simple fact extraction and perform logical i
 ## STEP 3: CROSS-MEMORY LINKING
 [Identify entities that appear in multiple memories and link related information. Make reasonable inferences when entities are strongly connected.]
 - Shared entities: [list people, places, events mentioned across different memories]
-- Connections found: [e.g., "Memory 1 mentions A moved from hometown -> Memory 2 mentions A's hometown is LA -> Therefore A moved from LA"]
+- Connections found: [e.g., "Memory 1 mentions A moved from hometown → Memory 2 mentions A's hometown is LA → Therefore A moved from LA"]
 - Inferred facts: [list any facts that require combining information from multiple memories]
 
-## STEP 4: TIME REFERENCE HANDLING
-[If applicable, identify relative or anchored time references without replacing them]
-- Original reference: [e.g., "the week before 9 June 2023", "yesterday", "last year"]
-- Anchor time: [e.g., "9 June 2023" or the memory/question timestamp, if needed]
-- Answer wording to preserve: [the exact relative/anchored expression to use in the final answer]
+## STEP 4: TIME REFERENCE CALCULATION
+[If applicable, convert relative time references]
+- Original reference: [e.g., "last year" from May 2022]
+- Calculated actual time: [e.g., "2021"]
 
 ## STEP 5: CONTRADICTION CHECK
 [If multiple memories contain different information]
@@ -95,7 +95,7 @@ Question time: {{ question_time }}
 Question: {{ question }}
 
 Now, follow the Chain-of-Thought process above to answer the question:
-""".strip()
+"""
 
 
 @dataclass(frozen=True)
@@ -117,7 +117,8 @@ class ThinkStepByStepAgent:
 
     name = "think_step_by_step"
 
-    def __init__(self, config: ThinkStepByStepAgentConfig | None = None) -> None:
+    def __init__(self,
+                 config: ThinkStepByStepAgentConfig | None = None) -> None:
         self.config = config or ThinkStepByStepAgentConfig()
         if self.config.answer_policy != "think_step_by_step_v1":
             raise ValueError(
@@ -135,22 +136,20 @@ class ThinkStepByStepAgent:
     ) -> AnswerRecord:
         request = question.to_read_request(
             top_k=top_k if top_k is not None else self.config.top_k,
-            context_budget_tokens=(
-                context_budget_tokens
-                if context_budget_tokens is not None
-                else self.config.context_budget_tokens
-            ),
+            context_budget_tokens=(context_budget_tokens
+                                   if context_budget_tokens is not None else
+                                   self.config.context_budget_tokens),
         )
         read_result = memory_runtime.read(request)
         prompt = render_think_step_by_step_prompt(
             memories=read_result.context.text or self.config.empty_memories,
             question=_question_text(question.query),
             question_time=question.query_time,
-            include_question_time=(
-                self.config.include_question_time and bool(question.query_time)
-            ),
+            include_question_time=(self.config.include_question_time
+                                   and bool(question.query_time)),
         )
         response, usage = self._complete(prompt)
+        reasoning = sanitize_response_for_judge(response)
         answer = extract_final_answer(response)
         return AnswerRecord(
             item_id=item_id,
@@ -160,7 +159,7 @@ class ThinkStepByStepAgent:
             answer=answer,
             agent_name=self.name,
             memory_artifact_id=read_result.stats.get("artifact_id"),
-            memory_reads=(read_result,),
+            memory_reads=(read_result, ),
             stats={
                 "answer_policy": self.config.answer_policy,
                 "model": self.config.model,
@@ -175,6 +174,7 @@ class ThinkStepByStepAgent:
             metadata={
                 "prompt_name": "think_step_by_step_v1",
                 "prompt": prompt,
+                "reasoning": reasoning,
                 "raw_response": response,
             },
         )
@@ -182,14 +182,12 @@ class ThinkStepByStepAgent:
     def _complete(self, prompt: str) -> tuple[str, dict[str, int]]:
         if not self.config.model or not self.config.api_key:
             raise RuntimeError(
-                "ThinkStepByStepAgent requires model and api_key in config."
-            )
+                "ThinkStepByStepAgent requires model and api_key in config.")
         try:
             from openai import OpenAI
         except Exception as exc:  # pragma: no cover - optional dependency guard
             raise RuntimeError(
-                "ThinkStepByStepAgent requires the openai package."
-            ) from exc
+                "ThinkStepByStepAgent requires the openai package.") from exc
 
         client_kwargs: dict[str, Any] = {"api_key": self.config.api_key}
         if self.config.base_url:
@@ -243,7 +241,8 @@ def render_think_step_by_step_prompt(
     prompt = THINK_STEP_BY_STEP_PROMPT.replace("{{ memories }}", memories)
     prompt = prompt.replace("{{ question }}", question)
     if include_question_time:
-        prompt = prompt.replace("{{ question_time }}", str(question_time or ""))
+        prompt = prompt.replace("{{ question_time }}", str(question_time
+                                                           or ""))
         prompt = prompt.replace("{% if include_question_time %}\n", "")
         prompt = prompt.replace("\n{% endif %}", "")
         return prompt
@@ -254,12 +253,17 @@ def render_think_step_by_step_prompt(
 
 
 def extract_final_answer(response: str) -> str:
-    text = _text_after_last_message_marker(str(response or "").strip())
+    text = sanitize_response_for_judge(response)
     matches = list(FINAL_ANSWER_PATTERN.finditer(text.lower()))
     if not matches:
         return text
     answer = text[matches[-1].end():].strip()
     return answer or text
+
+
+def sanitize_response_for_judge(response: str) -> str:
+    text = THINK_BLOCK_PATTERN.sub("", str(response or ""))
+    return _text_after_last_message_marker(text.strip())
 
 
 def _text_after_last_message_marker(text: str) -> str:

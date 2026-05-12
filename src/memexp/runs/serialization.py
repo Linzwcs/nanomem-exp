@@ -208,6 +208,7 @@ def answer_record_to_dict(record: AnswerRecord) -> dict[str, Any]:
         "ground_truth": to_jsonable(record.metadata.get("ground_truth")),
         "evidence_ids": list(record.metadata.get("evidence_ids") or ()),
         "answer": record.answer,
+        "reasoning": record.metadata.get("reasoning"),
         "context": _answer_context_text(record),
         "agent_name": record.agent_name,
         "memory_artifact_id": record.memory_artifact_id,
@@ -222,6 +223,8 @@ def answer_record_from_dict(payload: dict[str, Any]) -> AnswerRecord:
         metadata["ground_truth"] = payload.get("ground_truth")
     if payload.get("evidence_ids"):
         metadata["evidence_ids"] = tuple(payload.get("evidence_ids") or ())
+    if "reasoning" in payload:
+        metadata["reasoning"] = payload.get("reasoning")
     return AnswerRecord(
         item_id=str(payload["item_id"]),
         question_id=str(payload["question_id"]),
@@ -305,6 +308,7 @@ def evaluation_record_to_dict(record: EvaluationRecord) -> dict[str, Any]:
         "question_type": metadata.get("question_type"),
         "question_category": metadata.get("question_category"),
         "answer": metadata.get("answer"),
+        "judge_response": metadata.get("judge_response"),
         "ground_truth": to_jsonable(metadata.get("ground_truth")),
         "score": record.score,
         "passed": record.passed,
@@ -322,6 +326,7 @@ def evaluation_record_from_dict(payload: dict[str, Any]) -> EvaluationRecord:
         "question_type",
         "question_category",
         "answer",
+        "judge_response",
         "ground_truth",
     ):
         if key in payload:

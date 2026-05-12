@@ -52,14 +52,26 @@ class DatasetPromptJudgeEvaluatorTest(unittest.TestCase):
             query="When did Ava move?",
             answer="Ava moved on May 7th.",
             agent_name="test-agent",
+            metadata={
+                "reasoning": (
+                    "## STEP 1: RELEVANT MEMORIES EXTRACTION\n"
+                    "- Ava moved on May 7th.\n\n"
+                    "## FINAL ANSWER:\nAva moved on May 7th."
+                )
+            },
         )
 
         result = EvaluationRunner(evaluator).run(dataset, (answer,))
 
+        generated_answer = (
+            "## STEP 1: RELEVANT MEMORIES EXTRACTION\n"
+            "- Ava moved on May 7th.\n\n"
+            "## FINAL ANSWER:\nAva moved on May 7th."
+        )
         expected_prompt = LOCOMO_ACCURACY_PROMPT.format(
             question="When did Ava move?",
             gold_answer="7 May 2023",
-            generated_answer="Ava moved on May 7th.",
+            generated_answer=generated_answer,
         )
         self.assertEqual(backend.prompts, [expected_prompt])
         record = result.record_for("conv-1", "conv-1:q1")
@@ -67,8 +79,59 @@ class DatasetPromptJudgeEvaluatorTest(unittest.TestCase):
         self.assertEqual(record.score, 1.0)
         self.assertEqual(record.metrics["prompt_name"], "locomo_llm_judge_v1")
         self.assertEqual(result.summary["accuracy"], 1.0)
+        self.assertEqual(record.metadata["judge_response"], generated_answer)
         self.assertEqual(record.metadata["question_category"], "2")
         self.assertEqual(result.summary["by_question_category"]["2"]["accuracy"], 1.0)
+
+    def test_judge_uses_raw_response_without_internal_think_chain(self) -> None:
+        backend = FakeJudgeBackend('{"label":"CORRECT"}')
+        evaluator = DatasetPromptJudgeEvaluator(backend=backend)
+        dataset = Dataset(
+            name="locomo10_nonempty_answers",
+            items=(
+                DatasetItem(
+                    item_id="conv-1",
+                    conversations=(),
+                    questions=(
+                        DatasetQuestion(
+                            question_id="conv-1:q1",
+                            query="When did Ava move?",
+                            label=QuestionLabel(reference_answer="7 May 2023"),
+                            metadata={"question_type": "2"},
+                        ),
+                    ),
+                ),
+            ),
+        )
+        answer = AnswerRecord(
+            item_id="conv-1",
+            question_id="conv-1:q1",
+            query="When did Ava move?",
+            answer="Ava moved on May 7th.",
+            agent_name="test-agent",
+            metadata={
+                "raw_response": (
+                    "<think>private chain of thought</think>\n"
+                    "<|message|>\n"
+                    "## STEP 1: RELEVANT MEMORIES EXTRACTION\n"
+                    "- Ava moved on May 7th.\n\n"
+                    "## FINAL ANSWER:\nAva moved on May 7th."
+                )
+            },
+        )
+
+        result = EvaluationRunner(evaluator).run(dataset, (answer,))
+
+        self.assertNotIn("private chain of thought", backend.prompts[0])
+        self.assertIn("## STEP 1: RELEVANT MEMORIES EXTRACTION", backend.prompts[0])
+        self.assertEqual(
+            result.record_for("conv-1", "conv-1:q1").metadata["judge_response"],
+            (
+                "## STEP 1: RELEVANT MEMORIES EXTRACTION\n"
+                "- Ava moved on May 7th.\n\n"
+                "## FINAL ANSWER:\nAva moved on May 7th."
+            ),
+        )
 
     def test_longmemeval_uses_prompt_selected_by_question_type(self) -> None:
         backend = FakeJudgeBackend("yes")

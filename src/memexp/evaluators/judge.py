@@ -6,6 +6,7 @@ import os
 from typing import Any, Protocol
 
 from memexp.agents.base import AnswerRecord
+from memexp.agents.think_step_by_step import sanitize_response_for_judge
 from memexp.core.dataset import Dataset, DatasetItem, DatasetQuestion
 from memexp.evaluators.base import EvaluationRecord
 
@@ -158,7 +159,7 @@ class DatasetPromptJudgeEvaluator:
         prompt = LOCOMO_ACCURACY_PROMPT.format(
             question=str(question.query),
             gold_answer=reference_answer,
-            generated_answer=answer.answer,
+            generated_answer=_generated_answer_for_judge(answer),
         )
         raw_judge = self._backend_for("locomo").complete(prompt)
         label = _parse_locomo_label(raw_judge) or "WRONG"
@@ -193,7 +194,7 @@ class DatasetPromptJudgeEvaluator:
             question_type,
             str(question.query),
             str(reference_answer),
-            answer.answer,
+            _generated_answer_for_judge(answer),
             abstention=abstention,
         )
         raw_judge = self._backend_for("longmemeval").complete(prompt)
@@ -362,6 +363,16 @@ def _has_nonempty_gold_answer(value: Any) -> bool:
     if isinstance(value, str):
         return bool(value.strip())
     return True
+
+
+def _generated_answer_for_judge(answer: AnswerRecord) -> str:
+    reasoning = answer.metadata.get("reasoning")
+    if isinstance(reasoning, str) and reasoning.strip():
+        return reasoning.strip()
+    raw_response = answer.metadata.get("raw_response")
+    if isinstance(raw_response, str) and raw_response.strip():
+        return sanitize_response_for_judge(raw_response)
+    return answer.answer
 
 
 def _parse_locomo_label(raw_judge: str) -> str | None:

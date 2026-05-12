@@ -8,6 +8,7 @@ from memexp.agents.think_step_by_step import (
     ThinkStepByStepAgentConfig,
     extract_final_answer,
     render_think_step_by_step_prompt,
+    sanitize_response_for_judge,
 )
 
 __all__ = [
@@ -21,4 +22,5 @@ __all__ = [
     "ThinkStepByStepAgentConfig",
     "extract_final_answer",
     "render_think_step_by_step_prompt",
+    "sanitize_response_for_judge",
 ]

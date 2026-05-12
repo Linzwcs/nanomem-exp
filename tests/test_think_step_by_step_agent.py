@@ -14,6 +14,7 @@ from memexp import (
     ThinkStepByStepAgentConfig,
     extract_final_answer,
     render_think_step_by_step_prompt,
+    sanitize_response_for_judge,
 )
 from memexp.runs.serialization import answer_record_to_dict
 
@@ -49,9 +50,8 @@ class ThinkStepByStepAgentTest(unittest.TestCase):
         self.assertIn("Question time: 2024-02-01", prompt)
         self.assertIn("Question: Where did Ava move?", prompt)
         self.assertIn("## FINAL ANSWER:", prompt)
-        self.assertIn("PRESERVE relative or anchored time expressions", prompt)
-        self.assertIn("## STEP 4: TIME REFERENCE HANDLING", prompt)
-        self.assertNotIn("TIME REFERENCE CALCULATION", prompt)
+        self.assertIn("## STEP 4: TIME REFERENCE CALCULATION", prompt)
+        self.assertIn("Calculated actual time", prompt)
 
     def test_prompt_omits_question_time_when_disabled(self) -> None:
         prompt = render_think_step_by_step_prompt(
@@ -139,6 +139,7 @@ class ThinkStepByStepAgentTest(unittest.TestCase):
         self.assertIn("raw_response", record.metadata)
         serialized = answer_record_to_dict(record)
         self.assertEqual(serialized["answer"], "Ava moved to Seattle.")
+        self.assertIn("## STEP 1: RELEVANT MEMORIES EXTRACTION", serialized["reasoning"])
         self.assertNotIn("prompt", serialized["metadata"])
         self.assertNotIn("raw_response", serialized["metadata"])
 
@@ -175,6 +176,22 @@ class ThinkStepByStepAgentTest(unittest.TestCase):
                 "## final answer:\nAva moved to Seattle."
             ),
             "Ava moved to Seattle.",
+        )
+
+    def test_sanitize_response_for_judge_removes_internal_think_chain(self) -> None:
+        self.assertEqual(
+            sanitize_response_for_judge(
+                "<think>private chain of thought</think>\n"
+                "<|message|>\n"
+                "## STEP 1: RELEVANT MEMORIES EXTRACTION\n"
+                "- Ava moved to Seattle.\n\n"
+                "## FINAL ANSWER:\nAva moved to Seattle."
+            ),
+            (
+                "## STEP 1: RELEVANT MEMORIES EXTRACTION\n"
+                "- Ava moved to Seattle.\n\n"
+                "## FINAL ANSWER:\nAva moved to Seattle."
+            ),
         )
 
 
