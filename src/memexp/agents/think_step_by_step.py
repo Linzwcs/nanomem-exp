@@ -150,13 +150,12 @@ class ThinkStepByStepAgent:
         )
         response, usage = self._complete(prompt)
         reasoning = sanitize_response_for_judge(response)
-        answer = extract_final_answer(response)
         return AnswerRecord(
             item_id=item_id,
             question_id=question.question_id,
             query=question.query,
             query_time=question.query_time,
-            answer=answer,
+            answer=reasoning,
             agent_name=self.name,
             memory_artifact_id=read_result.stats.get("artifact_id"),
             memory_reads=(read_result, ),
@@ -168,7 +167,7 @@ class ThinkStepByStepAgent:
                 "context_blocks": read_result.context.block_count,
                 "qa_prompt_chars": len(prompt),
                 "qa_response_chars": len(response),
-                "qa_answer_chars": len(answer),
+                "qa_answer_chars": len(reasoning),
                 "qa_generation_tokens": usage,
             },
             metadata={

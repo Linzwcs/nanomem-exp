@@ -128,7 +128,14 @@ class ThinkStepByStepAgentTest(unittest.TestCase):
         self.assertIn("Question time: 2024-02-01", prompt)
         self.assertEqual(runtime.requests[0].top_k, 3)
         self.assertEqual(runtime.requests[0].context_budget_tokens, 80)
-        self.assertEqual(record.answer, "Ava moved to Seattle.")
+        self.assertEqual(
+            record.answer,
+            (
+                "## STEP 1: RELEVANT MEMORIES EXTRACTION\n"
+                "- Ava moved to Seattle.\n\n"
+                "## FINAL ANSWER:\nAva moved to Seattle."
+            ),
+        )
         self.assertEqual(record.agent_name, "think_step_by_step")
         self.assertEqual(record.memory_artifact_id, "artifact-1")
         self.assertEqual(
@@ -138,10 +145,59 @@ class ThinkStepByStepAgentTest(unittest.TestCase):
         self.assertIn("prompt", record.metadata)
         self.assertIn("raw_response", record.metadata)
         serialized = answer_record_to_dict(record)
-        self.assertEqual(serialized["answer"], "Ava moved to Seattle.")
+        self.assertEqual(serialized["answer"], record.answer)
         self.assertIn("## STEP 1: RELEVANT MEMORIES EXTRACTION", serialized["reasoning"])
         self.assertNotIn("prompt", serialized["metadata"])
         self.assertNotIn("raw_response", serialized["metadata"])
+
+    def test_agent_answer_removes_think_without_final_answer_extraction(self) -> None:
+        class FakeOpenAI:
+            def __init__(self, **kwargs):
+                self.chat = SimpleNamespace(
+                    completions=SimpleNamespace(create=self._create)
+                )
+
+            def _create(self, **kwargs):
+                return SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            message=SimpleNamespace(
+                                content=(
+                                    "<think>private chain of thought</think>\n"
+                                    "<|message|>\n"
+                                    "## STEP 1: RELEVANT MEMORIES EXTRACTION\n"
+                                    "- Ava moved to Seattle.\n\n"
+                                    "## FINAL ANSWER:\nAva moved to Seattle."
+                                )
+                            )
+                        )
+                    ],
+                    usage=SimpleNamespace(
+                        prompt_tokens=10,
+                        completion_tokens=5,
+                        total_tokens=15,
+                    ),
+                )
+
+        agent = ThinkStepByStepAgent(
+            ThinkStepByStepAgentConfig(
+                model="qa-model",
+                api_key="test-key",
+            )
+        )
+
+        with patch.dict(sys.modules, {"openai": SimpleNamespace(OpenAI=FakeOpenAI)}):
+            record = agent.answer(
+                DatasetQuestion(question_id="q1", query="Where did Ava move?"),
+                FakeMemoryRuntime(),
+                item_id="item-1",
+            )
+
+        self.assertNotIn("<think>", record.answer)
+        self.assertNotIn("private chain of thought", record.answer)
+        self.assertIn("## STEP 1: RELEVANT MEMORIES EXTRACTION", record.answer)
+        self.assertIn("## FINAL ANSWER:\nAva moved to Seattle.", record.answer)
+        self.assertEqual(record.answer, record.metadata["reasoning"])
 
     def test_extract_final_answer_uses_last_final_answer_marker(self) -> None:
         self.assertEqual(
