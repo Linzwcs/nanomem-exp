@@ -78,6 +78,10 @@ class _LLMExtractionFailure(Exception):
         self.generation = generation
 
 
+class _LLMResponseParseError(Exception):
+    pass
+
+
 def _render_message(message: dict[str, Any]) -> str:
     speaker = message_speaker(message) or message_role(message) or "unknown"
     return f"speaker: {speaker}\ncontent: {message_text(message)}"
@@ -457,13 +461,12 @@ class FactStoragePolicy(StoragePolicy):
         speaker_reference: str,
         generation_call_id: str,
     ) -> ExtractionResult:
-        fallback = _heuristic_facts(
-            target_messages,
-            speaker_reference=speaker_reference,
-        )
         if self.config.backend != "llm":
             return ExtractionResult(
-                facts=fallback,
+                facts=_heuristic_facts(
+                    target_messages,
+                    speaker_reference=speaker_reference,
+                ),
                 backend="heuristic",
                 backend_reason="llm_disabled",
                 generation=GenerationUsage(backend="heuristic"),
@@ -474,14 +477,7 @@ class FactStoragePolicy(StoragePolicy):
             speaker_reference=speaker_reference,
             generation_call_id=generation_call_id,
         )
-        if result.facts:
-            return result
-        return ExtractionResult(
-            facts=fallback,
-            backend="heuristic",
-            backend_reason=result.backend_reason,
-            generation=result.generation,
-        )
+        return result
 
     def _llm_facts(
         self,
@@ -524,7 +520,13 @@ class FactStoragePolicy(StoragePolicy):
             client_kwargs["base_url"] = base_url
         client = OpenAI(**client_kwargs)
         try:
-            response, attempt_count, last_error = self._complete_with_retry(
+            (
+                response,
+                facts,
+                backend_reason,
+                attempt_count,
+                last_error,
+            ) = self._complete_with_retry(
                 client=client,
                 model=model,
                 prompt=prompt,
@@ -537,7 +539,6 @@ class FactStoragePolicy(StoragePolicy):
                 backend_reason=failure.reason,
                 generation=failure.generation,
             )
-        content = response.choices[0].message.content or ""
         usage = getattr(response, "usage", None)
         prompt_tokens = _usage_value(usage, "prompt_tokens")
         completion_tokens = _usage_value(usage, "completion_tokens")
@@ -556,25 +557,10 @@ class FactStoragePolicy(StoragePolicy):
             last_error_type=type(last_error).__name__ if last_error else None,
             last_error_message=str(last_error) if last_error else None,
         )
-        payload = _extract_json_object(content)
-        facts_payload = (payload or {}).get("facts", []) or []
-        facts: list[dict[str, Any]] = []
-        for item in facts_payload:
-            if isinstance(item, dict):
-                text = str(item.get("text", "")).strip()
-                tags = [
-                    str(tag).strip() for tag in item.get("tags", [])
-                    if str(tag).strip()
-                ]
-            else:
-                text = str(item).strip()
-                tags = []
-            if text:
-                facts.append({"text": text, "tags": tags[:6]})
         return ExtractionResult(
             facts=facts,
             backend="llm",
-            backend_reason="ok" if facts else "empty_llm_facts",
+            backend_reason=backend_reason,
             generation=generation,
         )
 
@@ -585,7 +571,7 @@ class FactStoragePolicy(StoragePolicy):
         model: str,
         prompt: str,
         generation_call_id: str,
-    ) -> tuple[Any, int, Exception | None]:
+    ) -> tuple[Any, list[dict[str, Any]], str, int, Exception | None]:
         retry = self.config.retry
         max_attempts = max(1, retry.max_attempts)
         delay = max(0.0, retry.initial_delay_seconds)
@@ -607,12 +593,16 @@ class FactStoragePolicy(StoragePolicy):
                         },
                     ],
                 )
-                return response, attempt, last_error
+                content = response.choices[0].message.content or ""
+                facts, backend_reason = _parse_llm_facts(content)
+                return response, facts, backend_reason, attempt, last_error
             except Exception as exc:
                 last_error = exc
-                if not _is_retryable_error(
-                        exc,
-                        retry.retryable_errors) or attempt >= max_attempts:
+                retryable = isinstance(
+                    exc,
+                    _LLMResponseParseError,
+                ) or _is_retryable_error(exc, retry.retryable_errors)
+                if not retryable or attempt >= max_attempts:
                     if self.config.fail_on_error:
                         raise
                     raise _LLMExtractionFailure(
@@ -631,6 +621,34 @@ class FactStoragePolicy(StoragePolicy):
                     time.sleep(delay)
                     delay *= max(1.0, retry.backoff_multiplier)
         raise RuntimeError("unreachable retry state")
+
+
+def _parse_llm_facts(content: str) -> tuple[list[dict[str, Any]], str]:
+    payload = _extract_json_object(content)
+    if payload is None:
+        raise _LLMResponseParseError("invalid_llm_facts_json")
+    if "facts" not in payload:
+        raise _LLMResponseParseError("missing_llm_facts")
+    facts_payload = payload.get("facts")
+    if facts_payload is None:
+        facts_payload = []
+    if not isinstance(facts_payload, list):
+        raise _LLMResponseParseError("invalid_llm_facts_payload")
+
+    facts: list[dict[str, Any]] = []
+    for item in facts_payload:
+        if isinstance(item, dict):
+            text = str(item.get("text", "")).strip()
+            tags = [
+                str(tag).strip() for tag in item.get("tags", [])
+                if str(tag).strip()
+            ]
+        else:
+            text = str(item).strip()
+            tags = []
+        if text:
+            facts.append({"text": text, "tags": tags[:6]})
+    return facts, "ok" if facts else "empty_llm_facts"
 
 
 def _is_retryable_error(exc: Exception, retryable_errors: tuple[str,

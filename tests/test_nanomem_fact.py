@@ -9,10 +9,17 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from memexp import (
+    Dataset,
+    DatasetItem,
+    DatasetQuestion,
+    JsonStageCache,
     MemoryReadRequest,
     MemoryScope,
     MemoryUnit,
+    MemoryBuildRunner,
+    MemoryIndexRunner,
     NanoMemConfig,
+    QuestionLabel,
     RankedMemoryUnit,
     RenderConfig,
     NanoMemSystem,
@@ -251,20 +258,21 @@ class NanoMemFactTest(unittest.TestCase):
                     render=RenderConfig(context_tokens=80),
                 )
             )
-            artifact = system.build(
-                [
-                    [
-                        {
-                            "role": "user",
-                            "content": "I moved to Seattle. I like quiet cafes.",
-                            "timestamp": "2024-01-01",
-                        }
-                    ]
-                ],
-                scope=MemoryScope(scope_id="sample-storage-embedding-cache", dataset="toy"),
-            )
-
             with patch.dict(sys.modules, {"openai": SimpleNamespace(OpenAI=FakeOpenAI)}):
+                artifact = system.build(
+                    [
+                        [
+                            {
+                                "role": "user",
+                                "content": "I moved to Seattle. I like quiet cafes.",
+                                "timestamp": "2024-01-01",
+                            }
+                        ]
+                    ],
+                    scope=MemoryScope(scope_id="sample-storage-embedding-cache", dataset="toy"),
+                )
+                self.assertEqual(calls, [])
+
                 runtime = system.load(artifact)
                 self.assertEqual(len(calls), 1)
                 self.assertEqual(len(calls[0]["input"]), len(artifact.units))
@@ -284,10 +292,154 @@ class NanoMemFactTest(unittest.TestCase):
                 len(artifact.units),
             )
             self.assertEqual(
+                result.stats["storage_embedding_cache"]["hits"],
+                0,
+            )
+            self.assertEqual(
                 result.stats["embedding_cache"]["hits"],
                 len(artifact.units),
             )
             self.assertEqual(result.stats["embedding_cache"]["misses"], 1)
+
+    def test_index_warms_storage_embedding_cache_per_artifact(self) -> None:
+        calls: list[dict[str, object]] = []
+
+        class FakeOpenAI:
+            def __init__(self, **kwargs):
+                self.embeddings = SimpleNamespace(create=self._create)
+
+            def _create(self, **kwargs):
+                calls.append(kwargs)
+                return SimpleNamespace(
+                    data=[
+                        SimpleNamespace(embedding=_fake_embedding(text))
+                        for text in kwargs["input"]
+                    ]
+                )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            system = NanoMemSystem(
+                NanoMemConfig(
+                    storage=StorageConfig(backend="heuristic"),
+                    retrieve=RetrieveConfig(
+                        embedding_backend="openai_compatible",
+                        embedding_model="embed-a",
+                        embedding_api_key="test-key",
+                        embedding_cache_path=tmp,
+                        warm_storage_embeddings=True,
+                    ),
+                )
+            )
+
+            with patch.dict(sys.modules, {"openai": SimpleNamespace(OpenAI=FakeOpenAI)}):
+                first = system.build(
+                    [[{
+                        "role": "user",
+                        "content": "I moved to Seattle.",
+                        "timestamp": "2024-01-01",
+                    }]],
+                    scope=MemoryScope(scope_id="artifact-a", dataset="toy"),
+                )
+                second = system.build(
+                    [[{
+                        "role": "user",
+                        "content": "I moved to Boston.",
+                        "timestamp": "2024-01-02",
+                    }]],
+                    scope=MemoryScope(scope_id="artifact-b", dataset="toy"),
+                )
+                self.assertEqual(calls, [])
+                first_stats = system.index_artifact(first)
+                second_stats = system.index_artifact(second)
+
+            self.assertEqual(len(calls), 2)
+            self.assertEqual(len(calls[0]["input"]), len(first.units))
+            self.assertEqual(len(calls[1]["input"]), len(second.units))
+            self.assertEqual(first_stats["storage_embedding_cache"]["misses"], len(first.units))
+            self.assertEqual(second_stats["storage_embedding_cache"]["misses"], len(second.units))
+            self.assertEqual(len(list(Path(tmp).rglob("*.sqlite3"))), 2)
+
+    def test_index_stage_prepares_missing_embedding_shard_for_cached_build(self) -> None:
+        calls: list[dict[str, object]] = []
+
+        class FakeOpenAI:
+            def __init__(self, **kwargs):
+                self.embeddings = SimpleNamespace(create=self._create)
+
+            def _create(self, **kwargs):
+                calls.append(kwargs)
+                return SimpleNamespace(
+                    data=[
+                        SimpleNamespace(embedding=_fake_embedding(text))
+                        for text in kwargs["input"]
+                    ]
+                )
+
+        dataset = Dataset(
+            name="toy",
+            split="dev",
+            items=(
+                DatasetItem(
+                    item_id="item-1",
+                    subject_id="subject-1",
+                    conversations=(
+                        (
+                            {
+                                "id": "m1",
+                                "role": "user",
+                                "content": "I like cached facts.",
+                                "timestamp": "2024-01-01",
+                            },
+                        ),
+                    ),
+                    questions=(
+                        DatasetQuestion(
+                            question_id="q1",
+                            query="What does the user like?",
+                            query_time="2024-01-02",
+                            label=QuestionLabel(reference_answer="cached facts"),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            embedding_cache = root / "embedding-cache"
+            stage_cache = JsonStageCache(root / "stage-cache")
+            system = NanoMemSystem(
+                NanoMemConfig(
+                    storage=StorageConfig(backend="heuristic"),
+                    retrieve=RetrieveConfig(
+                        embedding_backend="openai_compatible",
+                        embedding_model="embed-a",
+                        embedding_api_key="test-key",
+                        embedding_cache_path=str(embedding_cache),
+                        warm_storage_embeddings=True,
+                    ),
+                )
+            )
+            runner = MemoryBuildRunner(system)
+            index_runner = MemoryIndexRunner(system)
+
+            with patch.dict(sys.modules, {"openai": SimpleNamespace(OpenAI=FakeOpenAI)}):
+                first = runner.run(dataset, cache=stage_cache)
+                indexed = index_runner.run(dataset, first)
+                self.assertEqual(len(calls), 1)
+                for path in embedding_cache.rglob("*.sqlite3"):
+                    path.unlink()
+                calls.clear()
+                second = runner.run(dataset, cache=stage_cache)
+                self.assertEqual(calls, [])
+                reindexed = index_runner.run(dataset, second)
+
+            self.assertEqual(first.summary["cache_miss_count"], 1)
+            self.assertEqual(indexed.summary["indexed_count"], 1)
+            self.assertEqual(second.summary["cache_hit_count"], 1)
+            self.assertEqual(reindexed.summary["indexed_count"], 1)
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(len(list(embedding_cache.rglob("*.sqlite3"))), 1)
 
     def test_context_cache_reuses_rendered_read_result_per_artifact(self) -> None:
         calls: list[dict[str, object]] = []
@@ -649,7 +801,128 @@ class NanoMemFactTest(unittest.TestCase):
             },
         )
 
-    def test_llm_storage_falls_back_after_retry_exhaustion(self) -> None:
+    def test_llm_storage_retries_malformed_fact_responses(self) -> None:
+        attempts: list[int] = []
+
+        class FakeOpenAI:
+            def __init__(self, **kwargs):
+                self.chat = SimpleNamespace(
+                    completions=SimpleNamespace(create=self._create)
+                )
+
+            def _create(self, **kwargs):
+                attempts.append(1)
+                content = (
+                    "not json"
+                    if len(attempts) == 1
+                    else '{"facts":[{"text":"user moved to Seattle","tags":[]}]}'
+                )
+                return SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            message=SimpleNamespace(content=content)
+                        )
+                    ],
+                    usage=SimpleNamespace(
+                        prompt_tokens=5,
+                        completion_tokens=3,
+                        total_tokens=8,
+                    ),
+                )
+
+        fake_openai = SimpleNamespace(OpenAI=FakeOpenAI)
+        with patch.dict(sys.modules, {"openai": fake_openai}):
+            artifact = NanoMemSystem(
+                NanoMemConfig(
+                    storage=StorageConfig(
+                        backend="llm",
+                        llm_model="fake-extractor",
+                        llm_api_key="test-key",
+                        retry=RetryConfig(
+                            max_attempts=2,
+                            initial_delay_seconds=0,
+                        ),
+                    )
+                )
+            ).build(
+                [
+                    [
+                        {
+                            "role": "user",
+                            "content": "I moved to Seattle.",
+                            "timestamp": "2024-01-01",
+                        }
+                    ]
+                ],
+                scope=MemoryScope(scope_id="sample-llm-parse-retry", dataset="toy"),
+            )
+
+        self.assertEqual(len(attempts), 2)
+        self.assertEqual(len(artifact.units), 1)
+        generation = artifact.units[0].metadata["generation"]
+        self.assertEqual(generation["call_count"], 2)
+        self.assertEqual(generation["attempt_count"], 2)
+        self.assertEqual(generation["last_error_type"], "_LLMResponseParseError")
+        self.assertEqual(
+            artifact.units[0].metadata["storage_backend_reason"],
+            "ok",
+        )
+
+    def test_llm_storage_empty_facts_are_not_retried_or_replaced(self) -> None:
+        attempts: list[int] = []
+
+        class FakeOpenAI:
+            def __init__(self, **kwargs):
+                self.chat = SimpleNamespace(
+                    completions=SimpleNamespace(create=self._create)
+                )
+
+            def _create(self, **kwargs):
+                attempts.append(1)
+                return SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            message=SimpleNamespace(content='{"facts":[]}')
+                        )
+                    ],
+                    usage=SimpleNamespace(
+                        prompt_tokens=5,
+                        completion_tokens=1,
+                        total_tokens=6,
+                    ),
+                )
+
+        fake_openai = SimpleNamespace(OpenAI=FakeOpenAI)
+        with patch.dict(sys.modules, {"openai": fake_openai}):
+            artifact = NanoMemSystem(
+                NanoMemConfig(
+                    storage=StorageConfig(
+                        backend="llm",
+                        llm_model="fake-extractor",
+                        llm_api_key="test-key",
+                        retry=RetryConfig(
+                            max_attempts=3,
+                            initial_delay_seconds=0,
+                        ),
+                    )
+                )
+            ).build(
+                [
+                    [
+                        {
+                            "role": "user",
+                            "content": "I moved to Seattle.",
+                            "timestamp": "2024-01-01",
+                        }
+                    ]
+                ],
+                scope=MemoryScope(scope_id="sample-llm-empty-facts", dataset="toy"),
+            )
+
+        self.assertEqual(len(attempts), 1)
+        self.assertEqual(len(artifact.units), 0)
+
+    def test_llm_storage_skips_after_retry_exhaustion(self) -> None:
         attempts: list[int] = []
 
         class FakeOpenAI:
@@ -686,23 +959,11 @@ class NanoMemFactTest(unittest.TestCase):
                         }
                     ]
                 ],
-                scope=MemoryScope(scope_id="sample-llm-fallback", dataset="toy", subject_id="user"),
+                scope=MemoryScope(scope_id="sample-llm-skip", dataset="toy", subject_id="user"),
             )
 
         self.assertEqual(len(attempts), 2)
-        self.assertGreaterEqual(len(artifact.units), 1)
-        self.assertTrue(
-            all(unit.metadata["storage_backend"] == "heuristic" for unit in artifact.units)
-        )
-        self.assertTrue(
-            all(
-                unit.metadata["storage_backend_reason"] == "llm_failed_after_retries"
-                for unit in artifact.units
-            )
-        )
-        self.assertTrue(
-            all(unit.metadata["generation"]["call_count"] == 2 for unit in artifact.units)
-        )
+        self.assertEqual(len(artifact.units), 0)
 
     def test_read_materializes_query_time_snapshot_from_full_timeline(self) -> None:
         system = NanoMemSystem(

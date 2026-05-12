@@ -85,6 +85,7 @@ class RunSpecManifestTest(unittest.TestCase):
             self.assertEqual(live_answer_line_counts, [1])
             self.assertEqual(report[0]["memory_system"], "raw_messages")
             self.assertTrue((run_dir / "build.jsonl").exists())
+            self.assertTrue((run_dir / "index.jsonl").exists())
             self.assertTrue((run_dir / "answers.jsonl").exists())
             self.assertTrue((run_dir / "evaluations.jsonl").exists())
             self.assertTrue((run_dir / "events.jsonl").exists())
@@ -130,6 +131,11 @@ class RunSpecManifestTest(unittest.TestCase):
             self.assertTrue(memory_config["retrieve"]["embedding_model"])
             self.assertTrue(agent_config["model"])
             self.assertTrue(evaluator_config["model"])
+            self.assertIsNotNone(spec.stage_execution)
+            self.assertLessEqual(spec.stage_execution.build.max_workers, 2)
+            self.assertLessEqual(spec.stage_execution.index.max_workers, 4)
+            self.assertLessEqual(spec.stage_execution.answer.max_workers, 2)
+            self.assertLessEqual(spec.stage_execution.evaluate.max_workers, 2)
             self.assertNotIn("env_file", spec.to_dict())
 
 

@@ -12,8 +12,10 @@ from memexp import (
     PackedContext,
     ThinkStepByStepAgent,
     ThinkStepByStepAgentConfig,
+    extract_final_answer,
     render_think_step_by_step_prompt,
 )
+from memexp.runs.serialization import answer_record_to_dict
 
 
 class FakeMemoryRuntime:
@@ -60,10 +62,12 @@ class ThinkStepByStepAgentTest(unittest.TestCase):
         self.assertIn("Question: question", prompt)
 
     def test_agent_uses_think_template_for_qa_completion(self) -> None:
+        client_kwargs: list[dict] = []
         calls: list[dict] = []
 
         class FakeOpenAI:
             def __init__(self, **kwargs):
+                client_kwargs.append(kwargs)
                 self.chat = SimpleNamespace(
                     completions=SimpleNamespace(create=self._create)
                 )
@@ -74,7 +78,11 @@ class ThinkStepByStepAgentTest(unittest.TestCase):
                     choices=[
                         SimpleNamespace(
                             message=SimpleNamespace(
-                                content="## FINAL ANSWER:\nAva moved to Seattle."
+                                content=(
+                                    "## STEP 1: RELEVANT MEMORIES EXTRACTION\n"
+                                    "- Ava moved to Seattle.\n\n"
+                                    "## FINAL ANSWER:\nAva moved to Seattle."
+                                )
                             )
                         )
                     ],
@@ -109,13 +117,15 @@ class ThinkStepByStepAgentTest(unittest.TestCase):
             )
 
         prompt = calls[0]["messages"][0]["content"]
+        self.assertEqual(client_kwargs[0]["base_url"], "https://qa.example/v1")
+        self.assertEqual(client_kwargs[0]["api_key"], "test-key")
         self.assertEqual(calls[0]["model"], "qa-model")
         self.assertEqual(calls[0]["max_tokens"], 123)
         self.assertIn("Ava moved to Seattle", prompt)
         self.assertIn("Question time: 2024-02-01", prompt)
         self.assertEqual(runtime.requests[0].top_k, 3)
         self.assertEqual(runtime.requests[0].context_budget_tokens, 80)
-        self.assertEqual(record.answer, "## FINAL ANSWER:\nAva moved to Seattle.")
+        self.assertEqual(record.answer, "Ava moved to Seattle.")
         self.assertEqual(record.agent_name, "think_step_by_step")
         self.assertEqual(record.memory_artifact_id, "artifact-1")
         self.assertEqual(
@@ -123,6 +133,35 @@ class ThinkStepByStepAgentTest(unittest.TestCase):
             {"prompt": 10, "completion": 5, "total": 15},
         )
         self.assertIn("prompt", record.metadata)
+        self.assertIn("raw_response", record.metadata)
+        serialized = answer_record_to_dict(record)
+        self.assertEqual(serialized["answer"], "Ava moved to Seattle.")
+        self.assertNotIn("prompt", serialized["metadata"])
+        self.assertNotIn("raw_response", serialized["metadata"])
+
+    def test_extract_final_answer_uses_last_final_answer_marker(self) -> None:
+        self.assertEqual(
+            extract_final_answer(
+                "## STEP 7\nMention the FINAL ANSWER marker.\n\n"
+                "## FINAL ANSWER:\nAva moved to Seattle."
+            ),
+            "Ava moved to Seattle.",
+        )
+        self.assertEqual(
+            extract_final_answer("No marker response."),
+            "No marker response.",
+        )
+
+    def test_extract_final_answer_strips_message_marker_before_final_answer(self) -> None:
+        self.assertEqual(
+            extract_final_answer(
+                "<|message|>\n"
+                "## FINAL ANSWER:\nOld answer.\n"
+                "<|MESSAGE|>\n"
+                "## final answer:\nAva moved to Seattle."
+            ),
+            "Ava moved to Seattle.",
+        )
 
 
 if __name__ == "__main__":

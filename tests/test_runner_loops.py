@@ -255,7 +255,49 @@ class RunnerLoopsTest(unittest.TestCase):
                 for event in logger.events
                 if event.event == "completed"
             },
-            {"build", "answer", "evaluate"},
+            {"run", "build", "index", "answer", "evaluate"},
+        )
+        self.assertTrue(
+            all(
+                "duration_ms" in event.metrics
+                for event in logger.events
+                if event.event == "completed" and event.stage != "run"
+            )
+        )
+        self.assertTrue(all(event.timestamp for event in logger.events))
+        self.assertTrue(
+            any(
+                event.stage == "run" and event.event == "started"
+                for event in logger.events
+            )
+        )
+        self.assertEqual(
+            {
+                event.stage
+                for event in logger.events
+                if event.event == "summary"
+            },
+            {"build", "index", "answer", "evaluate"},
+        )
+        self.assertTrue(
+            all(
+                "task_index" in event.metrics
+                for event in logger.events
+                if event.event in {"started", "completed"} and event.stage != "run"
+            )
+        )
+        self.assertTrue(
+            all(
+                any(
+                    event.stage == stage and event.event == "batch_started"
+                    for event in logger.events
+                )
+                and any(
+                    event.stage == stage and event.event == "batch_completed"
+                    for event in logger.events
+                )
+                for stage in ("build", "index", "answer", "evaluate")
+            )
         )
         self.assertFalse(any(event.event == "failed" for event in logger.events))
 
@@ -314,10 +356,16 @@ class RunnerLoopsTest(unittest.TestCase):
 
         self.assertEqual(answer.summary["answer_count"], 2)
         self.assertEqual(len(lines), 2)
+        first_payload = json.loads(lines[0])
         self.assertEqual(
-            [json.loads(line)["question_id"] for line in lines],
+            [first_payload["question_id"], json.loads(lines[1])["question_id"]],
             ["q1", "q2"],
         )
+        self.assertEqual(first_payload["ground_truth"], "Seattle")
+        self.assertIn("Seattle", first_payload["context"])
+        self.assertNotIn("memory_reads", first_payload)
+        self.assertNotIn("ranked_units", json.dumps(first_payload))
+        self.assertNotIn("\"unit\"", json.dumps(first_payload))
 
 
 if __name__ == "__main__":

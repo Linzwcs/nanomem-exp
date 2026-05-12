@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -201,6 +202,8 @@ class StageCacheTest(unittest.TestCase):
             self.assertEqual(first.summary["cache_miss_count"], 1)
             self.assertEqual(second.summary["cache_hit_count"], 1)
             self.assertEqual(second.records[0].answer, first.records[0].answer)
+            self.assertTrue((Path(tmp) / "answer.jsonl").exists())
+            self.assertFalse((Path(tmp) / "answer").exists())
 
             changed_agent = CountingAgent(version="v2")
             changed = AnswerRunner(
@@ -212,6 +215,10 @@ class StageCacheTest(unittest.TestCase):
 
             self.assertEqual(changed_agent.answer_count, 1)
             self.assertEqual(changed.summary["cache_miss_count"], 1)
+            self.assertEqual(
+                len((Path(tmp) / "answer.jsonl").read_text(encoding="utf-8").splitlines()),
+                2,
+            )
 
     def test_evaluation_cache_skips_evaluator_call(self) -> None:
         dataset = toy_dataset()
@@ -231,6 +238,8 @@ class StageCacheTest(unittest.TestCase):
             self.assertEqual(first.summary["cache_miss_count"], 1)
             self.assertEqual(second.summary["cache_hit_count"], 1)
             self.assertEqual(second.records[0].score, first.records[0].score)
+            self.assertTrue((Path(tmp) / "evaluate.jsonl").exists())
+            self.assertFalse((Path(tmp) / "evaluate").exists())
 
             changed_evaluator = CountingEvaluator(version="v2")
             changed = EvaluationRunner(changed_evaluator).run(
@@ -241,6 +250,10 @@ class StageCacheTest(unittest.TestCase):
 
             self.assertEqual(changed_evaluator.evaluate_count, 1)
             self.assertEqual(changed.summary["cache_miss_count"], 1)
+            self.assertEqual(
+                len((Path(tmp) / "evaluate.jsonl").read_text(encoding="utf-8").splitlines()),
+                2,
+            )
 
     def test_object_cache_spec_drops_secrets_and_urls(self) -> None:
         class ConfiguredObject:
