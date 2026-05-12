@@ -10,9 +10,9 @@ from memexp.core.dataset import DatasetQuestion
 
 
 FINAL_ANSWER_PATTERN = re.compile(
-    r"(?:^|\n)\s*(?:#{1,6}\s*)?\*{0,2}FINAL ANSWER\*{0,2}\s*:?\s*",
-    re.IGNORECASE,
+    r"(?:^|\n)\s*(?:#{1,6}\s*)?\*{0,2}final answer\*{0,2}\s*:?\s*",
 )
+ANSWER_MESSAGE_MARKERS = ("<|message|>",)
 
 THINK_STEP_BY_STEP_PROMPT = """
 You are an intelligent memory assistant tasked with retrieving accurate information from episodic memories.
@@ -250,12 +250,26 @@ def render_think_step_by_step_prompt(
 
 
 def extract_final_answer(response: str) -> str:
-    text = str(response or "").strip()
-    matches = list(FINAL_ANSWER_PATTERN.finditer(text))
+    text = _text_after_last_message_marker(str(response or "").strip())
+    matches = list(FINAL_ANSWER_PATTERN.finditer(text.lower()))
     if not matches:
         return text
     answer = text[matches[-1].end():].strip()
     return answer or text
+
+
+def _text_after_last_message_marker(text: str) -> str:
+    lowered = text.lower()
+    last_index = -1
+    last_marker_length = 0
+    for marker in ANSWER_MESSAGE_MARKERS:
+        marker_index = lowered.rfind(marker.lower())
+        if marker_index > last_index:
+            last_index = marker_index
+            last_marker_length = len(marker)
+    if last_index < 0:
+        return text
+    return text[last_index + last_marker_length:].strip()
 
 
 def _question_text(query: str | dict[str, Any]) -> str:
