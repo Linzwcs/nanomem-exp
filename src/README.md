@@ -46,9 +46,10 @@ Current implementation starts with `memexp.memsys.nanomem`:
 - adaptive Markdown temporal render policy with metadata-only time grouping;
 - unified `NanoMemSystem.build(...).load(...).read(...)` boundary.
 
-The initial platform runner layer is split into three reusable loops:
+The initial platform runner layer is split into four reusable loops:
 
 - `MemoryBuildRunner`: `DatasetItem.conversations -> MemoryArtifact`;
+- `MemoryIndexRunner`: `MemoryArtifact -> artifact-level indexes/caches`;
 - `AnswerRunner`: `MemoryArtifact + DatasetQuestion + AgentSystem -> AnswerRecord`;
 - `EvaluationRunner`: `AnswerRecord + reference + Evaluator -> EvaluationRecord`.
 

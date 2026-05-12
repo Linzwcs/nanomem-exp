@@ -12,6 +12,7 @@ from memexp.core.dataset import Dataset
 
 
 CACHE_SCHEMA_VERSION = "memexp.stage_cache.v1"
+RECORD_FILE_STAGES = frozenset({"answer", "evaluate"})
 
 
 class StageCache(Protocol):
@@ -35,8 +36,14 @@ class JsonStageCache:
     def __init__(self, root: str | Path) -> None:
         self.root = Path(root)
         self._lock = Lock()
+        self._record_stage_indexes: dict[str, dict[str, dict[str, Any]]] = {}
 
     def load(self, stage: str, key: str) -> dict[str, Any] | None:
+        if stage in RECORD_FILE_STAGES:
+            with self._lock:
+                records = self._record_stage_index(stage)
+                return records.get(key)
+
         path = self._path(stage, key)
         if not path.exists():
             return None
@@ -58,7 +65,6 @@ class JsonStageCache:
         *,
         metadata: dict[str, Any] | None = None,
     ) -> None:
-        path = self._path(stage, key)
         payload = {
             "cache_schema_version": CACHE_SCHEMA_VERSION,
             "stage": stage,
@@ -66,6 +72,16 @@ class JsonStageCache:
             "metadata": to_jsonable(metadata or {}),
             "value": to_jsonable(value),
         }
+        if stage in RECORD_FILE_STAGES:
+            with self._lock:
+                self.root.mkdir(parents=True, exist_ok=True)
+                with self._record_path(stage).open("a", encoding="utf-8") as handle:
+                    handle.write(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+                    handle.write("\n")
+                self._record_stage_index(stage)[key] = payload["value"]
+            return
+
+        path = self._path(stage, key)
         with self._lock:
             path.parent.mkdir(parents=True, exist_ok=True)
             tmp_path = path.with_name(f"{path.name}.{uuid4().hex}.tmp")
@@ -76,6 +92,34 @@ class JsonStageCache:
 
     def _path(self, stage: str, key: str) -> Path:
         return self.root / stage / f"{key}.json"
+
+    def _record_path(self, stage: str) -> Path:
+        return self.root / f"{stage}.jsonl"
+
+    def _record_stage_index(self, stage: str) -> dict[str, dict[str, Any]]:
+        cached = self._record_stage_indexes.get(stage)
+        if cached is not None:
+            return cached
+
+        records: dict[str, dict[str, Any]] = {}
+        path = self._record_path(stage)
+        if path.exists():
+            with path.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    try:
+                        payload = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if payload.get("cache_schema_version") != CACHE_SCHEMA_VERSION:
+                        continue
+                    if payload.get("stage") != stage:
+                        continue
+                    key = payload.get("key")
+                    value = payload.get("value")
+                    if isinstance(key, str) and isinstance(value, dict):
+                        records[key] = value
+        self._record_stage_indexes[stage] = records
+        return records
 
 
 def cache_key(stage: str, payload: Any) -> str:

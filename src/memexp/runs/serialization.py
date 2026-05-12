@@ -189,6 +189,15 @@ def build_record_from_dict(payload: dict[str, Any], record_type: type[T]) -> T:
     )
 
 
+def index_record_to_dict(record: Any) -> dict[str, Any]:
+    return {
+        "item_id": record.item_id,
+        "memory_artifact_id": record.memory_artifact_id,
+        "system_name": record.system_name,
+        "stats": to_jsonable(record.stats),
+    }
+
+
 def answer_record_to_dict(record: AnswerRecord) -> dict[str, Any]:
     metadata = _compact_answer_metadata(record.metadata)
     return {

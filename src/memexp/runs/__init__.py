@@ -11,6 +11,7 @@ from memexp.runs.execution import (
     StageExecutionConfig,
 )
 from memexp.runs.experiment import ExperimentRunResult, ExperimentRunner
+from memexp.runs.index import IndexRecord, IndexRunResult, MemoryIndexRunner
 from memexp.runs.manifest import write_run_manifest
 from memexp.runs.records import JsonlRecordSink
 from memexp.runs.spec import (
@@ -22,6 +23,7 @@ from memexp.runs.spec import (
     load_experiment_run_spec,
 )
 from memexp.runs.logging import (
+    CompositeRunLogger,
     JsonlRunLogger,
     ListRunLogger,
     NullRunLogger,
@@ -43,11 +45,15 @@ __all__ = [
     "ExperimentRunResult",
     "ExperimentRunner",
     "ExperimentRunSpec",
+    "IndexRecord",
+    "IndexRunResult",
     "JsonStageCache",
+    "CompositeRunLogger",
     "JsonlRunLogger",
     "JsonlRecordSink",
     "ListRunLogger",
     "MemoryBuildRunner",
+    "MemoryIndexRunner",
     "NullRunLogger",
     "RunEvent",
     "RunExecutionConfig",

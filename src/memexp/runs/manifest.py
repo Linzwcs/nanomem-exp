@@ -12,6 +12,7 @@ from memexp.runs.serialization import (
     answer_record_to_dict,
     build_record_to_dict,
     evaluation_record_to_dict,
+    index_record_to_dict,
 )
 
 
@@ -28,6 +29,7 @@ def write_run_manifest(
 
     paths = {
         "build_records": target / "build.jsonl",
+        "index_records": target / "index.jsonl",
         "answer_records": target / "answers.jsonl",
         "evaluation_records": target / "evaluations.jsonl",
         "summary": target / "summary.json",
@@ -39,6 +41,9 @@ def write_run_manifest(
 
     _write_jsonl(paths["build_records"], [
         build_record_to_dict(record) for record in result.build.records
+    ])
+    _write_jsonl(paths["index_records"], [
+        index_record_to_dict(record) for record in result.index.records
     ])
     _write_jsonl(paths["answer_records"], [
         answer_record_to_dict(record) for record in result.answer.records

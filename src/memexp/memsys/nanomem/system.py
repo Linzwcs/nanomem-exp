@@ -62,13 +62,12 @@ class NanoMemSystem:
                 "storage_token_stats": storage_token_stats(conversations, units),
             },
         )
-        self.prepare_build_artifact(artifact)
         return artifact
 
-    def prepare_build_artifact(self, artifact: MemoryArtifact) -> dict[str, Any]:
+    def index_artifact(self, artifact: MemoryArtifact) -> dict[str, Any]:
         if artifact.system_name != self.name:
             raise ValueError(
-                f"NanoMemSystem cannot prepare artifact from system={artifact.system_name}"
+                f"NanoMemSystem cannot index artifact from system={artifact.system_name}"
             )
         return {
             "storage_embedding_cache": _warm_storage_embeddings_for_artifact(
@@ -76,6 +75,9 @@ class NanoMemSystem:
                 config=self.config,
             )
         }
+
+    def prepare_build_artifact(self, artifact: MemoryArtifact) -> dict[str, Any]:
+        return self.index_artifact(artifact)
 
     def load(self, artifact: MemoryArtifact) -> "NanoMemRuntime":
         if artifact.system_name != self.name:

@@ -13,6 +13,8 @@ Configs should describe the evaluated system, not incidental CLI arguments. A co
 
 Retriever choices belong inside the `MemorySystem` read policy. Fixed-query QA
 belongs inside an `AgentSystem`, not in a separate top-level retrieval pipeline.
+Artifact-level index materialization, such as storage embedding cache warmup,
+belongs in the `index` stage between build and answer.
 
 LLM configs are explicit JSON files. Do not rely on `.env` loading inside the
 runner. Fill `REPLACE_WITH_*` values directly in a private copy before running:
@@ -22,7 +24,7 @@ runner. Fill `REPLACE_WITH_*` values directly in a private copy before running:
 
 Both use:
 
-- fact extraction model: `GPT-oss-120b`
-- QA model: `GPT-oss-120b`
-- evaluation judge model: `GPT-oss-120b`
+- fact extraction model: `gpt-oss-120B`
+- QA model: `gpt-oss-120B`
+- evaluation judge model: `gpt-oss-120B`
 - embedding model: `qwen3-0.6b-embedding`

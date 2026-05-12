@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 from threading import Lock
@@ -15,6 +16,9 @@ class RunEvent:
     question_id: str | None = None
     message: str = ""
     metrics: dict[str, Any] = field(default_factory=dict)
+    timestamp: str = field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
 
 
 class RunLogger(Protocol):
@@ -25,6 +29,15 @@ class RunLogger(Protocol):
 class NullRunLogger:
     def emit(self, event: RunEvent) -> None:
         return None
+
+
+class CompositeRunLogger:
+    def __init__(self, *loggers: RunLogger) -> None:
+        self.loggers = tuple(loggers)
+
+    def emit(self, event: RunEvent) -> None:
+        for logger in self.loggers:
+            logger.emit(event)
 
 
 class ListRunLogger:
@@ -55,6 +68,7 @@ class JsonlRunLogger:
 
     def emit(self, event: RunEvent) -> None:
         payload = {
+            "timestamp": event.timestamp,
             "stage": event.stage,
             "event": event.event,
             "item_id": event.item_id,

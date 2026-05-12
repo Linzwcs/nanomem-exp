@@ -38,7 +38,7 @@ from memexp.memsys.nanomem import (
 from memexp.runs.cache import JsonStageCache
 from memexp.runs.execution import RunExecutionConfig, StageExecutionConfig
 from memexp.runs.experiment import ExperimentRunResult, ExperimentRunner
-from memexp.runs.logging import JsonlRunLogger
+from memexp.runs.logging import CompositeRunLogger, JsonlRunLogger, TerminalRunLogger
 from memexp.runs.manifest import write_run_manifest
 from memexp.runs.records import JsonlRecordSink
 from memexp.runs.serialization import answer_record_to_dict
@@ -132,7 +132,7 @@ def execute_experiment_run_spec(spec: ExperimentRunSpec) -> ExperimentRunOutput:
     dataset = _load_dataset(spec.dataset)
     cache = JsonStageCache(spec.cache_dir) if spec.cache_dir else None
     events_path = run_dir / "events.jsonl"
-    logger = JsonlRunLogger(events_path)
+    logger = CompositeRunLogger(JsonlRunLogger(events_path), TerminalRunLogger())
     answers_path = run_dir / "answers.jsonl"
     answer_record_sink = JsonlRecordSink(answers_path, answer_record_to_dict)
 
@@ -317,6 +317,10 @@ def _stage_execution_config(
     return StageExecutionConfig(
         build=_execution_config(
             _stage_execution_payload(payload, "build"),
+            fallback=fallback,
+        ),
+        index=_execution_config(
+            _stage_execution_payload(payload, "index"),
             fallback=fallback,
         ),
         answer=_execution_config(
