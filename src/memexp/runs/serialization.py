@@ -295,19 +295,37 @@ def _answer_memory_reads_from_dict(
 
 
 def evaluation_record_to_dict(record: EvaluationRecord) -> dict[str, Any]:
+    metadata = dict(record.metadata)
     return {
         "item_id": record.item_id,
         "question_id": record.question_id,
         "evaluator_name": record.evaluator_name,
+        "query": to_jsonable(metadata.get("query")),
+        "query_time": metadata.get("query_time"),
+        "question_type": metadata.get("question_type"),
+        "question_category": metadata.get("question_category"),
+        "answer": metadata.get("answer"),
+        "ground_truth": to_jsonable(metadata.get("ground_truth")),
         "score": record.score,
         "passed": record.passed,
         "reference": to_jsonable(record.reference),
         "metrics": to_jsonable(record.metrics),
-        "metadata": to_jsonable(record.metadata),
+        "metadata": to_jsonable(metadata),
     }
 
 
 def evaluation_record_from_dict(payload: dict[str, Any]) -> EvaluationRecord:
+    metadata = dict(payload.get("metadata") or {})
+    for key in (
+        "query",
+        "query_time",
+        "question_type",
+        "question_category",
+        "answer",
+        "ground_truth",
+    ):
+        if key in payload:
+            metadata[key] = payload.get(key)
     return EvaluationRecord(
         item_id=str(payload["item_id"]),
         question_id=str(payload["question_id"]),
@@ -316,5 +334,5 @@ def evaluation_record_from_dict(payload: dict[str, Any]) -> EvaluationRecord:
         passed=payload.get("passed"),
         reference=payload.get("reference"),
         metrics=dict(payload.get("metrics") or {}),
-        metadata=dict(payload.get("metadata") or {}),
+        metadata=metadata,
     )

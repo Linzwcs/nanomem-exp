@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 from datetime import datetime, timezone
 import json
 from pathlib import Path
@@ -32,6 +33,8 @@ def write_run_manifest(
         "index_records": target / "index.jsonl",
         "answer_records": target / "answers.jsonl",
         "evaluation_records": target / "evaluations.jsonl",
+        "evaluation_by_category_json": target / "evaluation_by_category.json",
+        "evaluation_by_category_csv": target / "evaluation_by_category.csv",
         "summary": target / "summary.json",
         "report_json": target / "report.json",
         "report_csv": target / "report.csv",
@@ -52,6 +55,12 @@ def write_run_manifest(
         evaluation_record_to_dict(record)
         for record in result.evaluation.records
     ])
+    category_scores = result.evaluation.summary.get("by_question_category") or {}
+    _write_json(paths["evaluation_by_category_json"], category_scores)
+    _write_category_scores_csv(
+        paths["evaluation_by_category_csv"],
+        category_scores,
+    )
     _write_json(paths["summary"], result.summary)
 
     row = experiment_report_row(result, run_id=run_id)
@@ -91,3 +100,24 @@ def _write_json(path: Path, payload: Any) -> None:
     with path.open("w", encoding="utf-8") as handle:
         json.dump(to_jsonable(payload), handle, ensure_ascii=False, indent=2, sort_keys=True)
         handle.write("\n")
+
+
+def _write_category_scores_csv(path: Path, scores: dict[str, Any]) -> None:
+    fields = (
+        "question_category",
+        "question_count",
+        "evaluation_count",
+        "evaluated_count",
+        "skipped_count",
+        "passed_count",
+        "accuracy",
+        "avg_score",
+    )
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(fields))
+        writer.writeheader()
+        for category, stats in sorted(scores.items()):
+            row = {"question_category": category}
+            if isinstance(stats, dict):
+                row.update(stats)
+            writer.writerow({field: row.get(field) for field in fields})

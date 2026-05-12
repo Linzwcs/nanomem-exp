@@ -88,8 +88,21 @@ class RunSpecManifestTest(unittest.TestCase):
             self.assertTrue((run_dir / "index.jsonl").exists())
             self.assertTrue((run_dir / "answers.jsonl").exists())
             self.assertTrue((run_dir / "evaluations.jsonl").exists())
+            self.assertTrue((run_dir / "evaluation_by_category.json").exists())
+            self.assertTrue((run_dir / "evaluation_by_category.csv").exists())
             self.assertTrue((run_dir / "events.jsonl").exists())
             self.assertIn("accuracy", (run_dir / "report.md").read_text())
+            evaluation_payload = json.loads(
+                (run_dir / "evaluations.jsonl").read_text(encoding="utf-8").splitlines()[0]
+            )
+            category_payload = json.loads(
+                (run_dir / "evaluation_by_category.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(evaluation_payload["question_category"], "location")
+            self.assertEqual(evaluation_payload["question_type"], "single-hop")
+            self.assertEqual(evaluation_payload["ground_truth"], "Seattle")
+            self.assertIn("Seattle", evaluation_payload["answer"])
+            self.assertEqual(category_payload["location"]["accuracy"], 1.0)
 
     def test_cli_runs_json_spec(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -167,7 +180,10 @@ def _toy_unified_payload() -> dict:
                             "evidence_ids": ["m1"],
                             "metadata": {},
                         },
-                        "metadata": {},
+                        "metadata": {
+                            "category": "location",
+                            "question_type": "single-hop",
+                        },
                     }
                 ],
                 "metadata": {},

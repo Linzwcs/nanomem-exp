@@ -49,6 +49,9 @@ class ThinkStepByStepAgentTest(unittest.TestCase):
         self.assertIn("Question time: 2024-02-01", prompt)
         self.assertIn("Question: Where did Ava move?", prompt)
         self.assertIn("## FINAL ANSWER:", prompt)
+        self.assertIn("PRESERVE relative or anchored time expressions", prompt)
+        self.assertIn("## STEP 4: TIME REFERENCE HANDLING", prompt)
+        self.assertNotIn("TIME REFERENCE CALCULATION", prompt)
 
     def test_prompt_omits_question_time_when_disabled(self) -> None:
         prompt = render_think_step_by_step_prompt(

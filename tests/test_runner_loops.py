@@ -73,12 +73,14 @@ class RunnerLoopsTest(unittest.TestCase):
                             query="Where did the user move?",
                             query_time="2024-02-01",
                             label=QuestionLabel(reference_answer="Seattle"),
+                            metadata={"category": "location"},
                         ),
                         DatasetQuestion(
                             question_id="q-boston-before",
                             query="What city will the user visit?",
                             query_time="2024-02-01",
                             label=QuestionLabel(reference_answer="Boston"),
+                            metadata={"category": "future"},
                         ),
                     ),
                 ),
@@ -119,6 +121,22 @@ class RunnerLoopsTest(unittest.TestCase):
         self.assertEqual(evaluation.summary["evaluated_count"], 2)
         self.assertEqual(evaluation.summary["passed_count"], 1)
         self.assertEqual(evaluation.summary["accuracy"], 0.5)
+        self.assertEqual(
+            evaluation.summary["by_question_category"]["location"]["accuracy"],
+            1.0,
+        )
+        self.assertEqual(
+            evaluation.summary["by_question_category"]["future"]["accuracy"],
+            0.0,
+        )
+        self.assertEqual(
+            evaluation.record_for("item-1", "q-seattle").metadata["question_category"],
+            "location",
+        )
+        self.assertEqual(
+            evaluation.record_for("item-1", "q-seattle").metadata["answer"],
+            seattle_answer.answer,
+        )
 
     def test_experiment_runner_composes_three_loops(self) -> None:
         dataset = Dataset(

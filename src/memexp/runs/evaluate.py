@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Iterable
 
 from memexp.agents.base import AnswerRecord
-from memexp.core.dataset import Dataset
+from memexp.core.dataset import Dataset, DatasetQuestion
 from memexp.evaluators.base import EvaluationRecord, Evaluator
 from memexp.runs.answer import AnswerRunResult
 from memexp.runs.cache import (
@@ -88,7 +88,12 @@ class EvaluationRunner:
                             metrics={"cache_key": cache_record_key},
                         )
                     )
-                    return evaluation_record_from_dict(cached), True
+                    record = evaluation_record_from_dict(cached)
+                    return _record_with_question_details(
+                        record,
+                        question=question,
+                        answer=answer,
+                    ), True
                 active_logger.emit(
                     RunEvent(
                         stage="evaluate",
@@ -104,6 +109,11 @@ class EvaluationRunner:
                 question,
                 dataset=dataset,
                 item=item,
+            )
+            record = _record_with_question_details(
+                record,
+                question=question,
+                answer=answer,
             )
             if cache is not None:
                 cache.store(
@@ -147,6 +157,7 @@ class EvaluationRunner:
         passed_count = sum(1 for record in evaluated if record.passed)
         scored = tuple(record for record in records if record.score is not None)
         score_total = sum(record.score or 0.0 for record in scored)
+        by_question_category = _category_breakdown(records)
         return EvaluationRunResult(
             dataset_name=dataset.name,
             evaluator_name=self.evaluator_name,
@@ -169,6 +180,7 @@ class EvaluationRunner:
                 "avg_score": (
                     score_total / len(scored) if scored else None
                 ),
+                "by_question_category": by_question_category,
             },
         )
 
@@ -201,6 +213,75 @@ def _evaluation_task_metrics(
     metrics = _evaluation_record_metrics(record)
     metrics["cache_hit"] = cache_hit
     return metrics
+
+
+def _record_with_question_details(
+    record: EvaluationRecord,
+    *,
+    question: DatasetQuestion,
+    answer: AnswerRecord,
+) -> EvaluationRecord:
+    metadata = dict(record.metadata)
+    metadata.update({
+        "query": to_jsonable(question.query),
+        "query_time": question.query_time,
+        "answer": answer.answer,
+        "ground_truth": _reference_answer(question),
+        "question_type": _question_type(question),
+        "question_category": _question_category(question),
+        "question_metadata": to_jsonable(question.metadata),
+    })
+    return replace(record, metadata=metadata)
+
+
+def _category_breakdown(
+    records: tuple[EvaluationRecord, ...],
+) -> dict[str, dict[str, Any]]:
+    grouped: dict[str, list[EvaluationRecord]] = {}
+    for record in records:
+        category = str(record.metadata.get("question_category") or "unknown")
+        grouped.setdefault(category, []).append(record)
+    return {
+        category: _score_summary(category_records)
+        for category, category_records in sorted(grouped.items())
+    }
+
+
+def _score_summary(records: list[EvaluationRecord]) -> dict[str, Any]:
+    evaluated = tuple(record for record in records if record.passed is not None)
+    passed_count = sum(1 for record in evaluated if record.passed)
+    scored = tuple(record for record in records if record.score is not None)
+    score_total = sum(record.score or 0.0 for record in scored)
+    return {
+        "question_count": len(records),
+        "evaluation_count": len(records),
+        "evaluated_count": len(evaluated),
+        "skipped_count": len(records) - len(evaluated),
+        "passed_count": passed_count,
+        "accuracy": passed_count / len(evaluated) if evaluated else None,
+        "avg_score": score_total / len(scored) if scored else None,
+    }
+
+
+def _question_category(question: DatasetQuestion) -> str:
+    for key in ("question_category", "category", "question_type", "type"):
+        value = question.metadata.get(key)
+        if value is not None and str(value).strip():
+            return str(value)
+    return "unknown"
+
+
+def _question_type(question: DatasetQuestion) -> str | None:
+    value = question.metadata.get("question_type")
+    if value is None:
+        return None
+    return str(value)
+
+
+def _reference_answer(question: DatasetQuestion) -> Any:
+    if question.label is None:
+        return None
+    return to_jsonable(question.label.reference_answer)
 
 
 def _evaluation_cache_key(

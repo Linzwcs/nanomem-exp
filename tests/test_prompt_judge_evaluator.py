@@ -67,6 +67,8 @@ class DatasetPromptJudgeEvaluatorTest(unittest.TestCase):
         self.assertEqual(record.score, 1.0)
         self.assertEqual(record.metrics["prompt_name"], "locomo_llm_judge_v1")
         self.assertEqual(result.summary["accuracy"], 1.0)
+        self.assertEqual(record.metadata["question_category"], "2")
+        self.assertEqual(result.summary["by_question_category"]["2"]["accuracy"], 1.0)
 
     def test_longmemeval_uses_prompt_selected_by_question_type(self) -> None:
         backend = FakeJudgeBackend("yes")
@@ -113,6 +115,11 @@ class DatasetPromptJudgeEvaluatorTest(unittest.TestCase):
             record.metrics["prompt_name"],
             "longmemeval_official_eval_qa_v1",
         )
+        self.assertEqual(record.metadata["question_category"], "temporal-reasoning")
+        self.assertEqual(
+            result.summary["by_question_category"]["temporal-reasoning"]["accuracy"],
+            1.0,
+        )
 
     def test_locomo_category_5_is_skipped_without_judge_call(self) -> None:
         backend = FakeJudgeBackend('{"label":"CORRECT"}')
@@ -148,6 +155,10 @@ class DatasetPromptJudgeEvaluatorTest(unittest.TestCase):
         record = result.record_for("conv-1", "conv-1:q5")
         self.assertIsNone(record.passed)
         self.assertEqual(record.metrics["skip_reason"], "category_5")
+        self.assertEqual(
+            result.summary["by_question_category"]["5"]["skipped_count"],
+            1,
+        )
 
 
 if __name__ == "__main__":

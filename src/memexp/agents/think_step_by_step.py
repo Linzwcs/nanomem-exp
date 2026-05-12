@@ -34,6 +34,7 @@ It is CRITICAL that you move beyond simple fact extraction and perform logical i
 2. ALWAYS include exact numbers, amounts, prices, percentages, dates, times
 3. PRESERVE frequencies exactly - "every Tuesday and Thursday" not "twice a week"
 4. MAINTAIN all proper nouns and entities as they appear
+5. PRESERVE relative or anchored time expressions as written. Do not convert "the week before 9 June 2023" into an absolute date range unless the question explicitly asks for a calendar-date calculation.
 
 # RESPONSE FORMAT (You MUST follow this structure):
 
@@ -57,10 +58,11 @@ It is CRITICAL that you move beyond simple fact extraction and perform logical i
 - Connections found: [e.g., "Memory 1 mentions A moved from hometown -> Memory 2 mentions A's hometown is LA -> Therefore A moved from LA"]
 - Inferred facts: [list any facts that require combining information from multiple memories]
 
-## STEP 4: TIME REFERENCE CALCULATION
-[If applicable, convert relative time references]
-- Original reference: [e.g., "last year" from May 2022]
-- Calculated actual time: [e.g., "2021"]
+## STEP 4: TIME REFERENCE HANDLING
+[If applicable, identify relative or anchored time references without replacing them]
+- Original reference: [e.g., "the week before 9 June 2023", "yesterday", "last year"]
+- Anchor time: [e.g., "9 June 2023" or the memory/question timestamp, if needed]
+- Answer wording to preserve: [the exact relative/anchored expression to use in the final answer]
 
 ## STEP 5: CONTRADICTION CHECK
 [If multiple memories contain different information]
