@@ -10,7 +10,9 @@ from memexp.core.dataset import DatasetQuestion
 
 
 FINAL_ANSWER_PATTERN = re.compile(
-    r"(?:^|\n)\s*(?:#{1,6}\s*)?\*{0,2}final answer\*{0,2}\s*:?\s*",
+    r"(?:^|\n)\s*(?:[*_]{1,3}\s*)?(?:#{1,6}\s*)?"
+    r"(?:[*_]{0,3}\s*)?final\s+answer(?:\s*[*_]{0,3})?"
+    r"\s*[:：]?\s*(?:[*_]{0,3})?\s*",
 )
 ANSWER_MESSAGE_MARKERS = ("<|message|>",)
 

@@ -152,6 +152,17 @@ class ThinkStepByStepAgentTest(unittest.TestCase):
             "No marker response.",
         )
 
+    def test_extract_final_answer_handles_bold_markdown_heading(self) -> None:
+        self.assertEqual(
+            extract_final_answer(
+                "**## STEP 7: ANSWER FORMULATION**\n"
+                "The evidence points to May 7, 2023.\n\n"
+                "**## FINAL ANSWER:**\n"
+                "Caroline went to the LGBTQ support group on **May 7, 2023**."
+            ),
+            "Caroline went to the LGBTQ support group on **May 7, 2023**.",
+        )
+
     def test_extract_final_answer_strips_message_marker_before_final_answer(self) -> None:
         self.assertEqual(
             extract_final_answer(
