@@ -10,3 +10,6 @@ Available exports:
   unified dataset JSON shape.
 - `export_locomo_unified.py`: converts Locomo JSON arrays to the unified dataset
   JSON shape.
+- `export_mbench_unified.py`: converts an MBench persona directory containing
+  `history_sessions.json` and `bench_instances.json` to the unified dataset JSON
+  shape.

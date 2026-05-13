@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import os
+import re
 from typing import Any, Protocol
 
 from memexp.agents.base import AnswerRecord
@@ -12,6 +13,7 @@ from memexp.evaluators.base import EvaluationRecord
 
 LOCOMO_PROMPT_NAME = "locomo_llm_judge_v1"
 LONGMEMEVAL_PROMPT_NAME = "longmemeval_official_eval_qa_v1"
+MBENCH_PROMPT_NAME = "mbench_llm_judge_v1"
 
 LOCOMO_ACCURACY_PROMPT = """
 Your task is to label an answer to a question as ’CORRECT’ or ’WRONG’. You will be given the following data:
@@ -38,6 +40,120 @@ Do NOT include both CORRECT and WRONG in your response, or it will break the eva
 
 Just return the label CORRECT or WRONG in a json format with the key as "label".
 """
+
+RELATION_TYPE_GUIDANCE = {
+    "complementary": (
+        "The memory items are jointly valid. Judge whether the answer correctly "
+        "integrates compatible evidence."
+    ),
+    "nuanced": (
+        "The memory items are valid only when temporal or contextual conditions "
+        "are preserved. Judge whether the answer selects the condition relevant "
+        "to the question."
+    ),
+    "contradictory": (
+        "The memory items remain inconsistent. Judge whether the answer respects "
+        "the unresolved inconsistency instead of merging incompatible memories "
+        "into one confident state."
+    ),
+    "default": "Judge only against the provided references and metadata.",
+}
+
+RELATION_SUBTYPE_GUIDANCE = {
+    "K=1": (
+        "One memory item is decisive for the target; compatible background alone "
+        "is not enough."
+    ),
+    "K>1": (
+        "Multiple compatible memory items must be combined; all required target "
+        "facts or constraints should be present."
+    ),
+    "any_one": (
+        "Any one of multiple compatible memory items is sufficient; do not require "
+        "all valid paths."
+    ),
+    "Temporal": "Time determines which memory applies.",
+    "Context": "Context determines which memory applies.",
+    "contradictory": (
+        "The memories remain irreconcilable under supported conditions."
+    ),
+    "non_persona_contradiction": (
+        "This is a factual or non-persona contradiction; do not infer persona "
+        "context from the subtype label."
+    ),
+    "default": "No additional relation-subtype guidance is available.",
+}
+
+RELATION_SUBTYPE_ALIASES = {
+    "a_user_vs_user": "non_persona_contradiction",
+    "b_user_vs_non_user": "non_persona_contradiction",
+    "c_non_user_vs_non_user": "non_persona_contradiction",
+}
+
+SOURCE_GUIDANCE = {
+    "user-related": (
+        "This is a user-related memory question. Judge user preferences, status, "
+        "habits, identity, or contextual state only from the provided references."
+    ),
+    "user-unrelated": (
+        "This is not a persona/user-related grading case. Judge only by the "
+        "provided references and relation semantics."
+    ),
+    "default": "Judge neutrally using the provided references and metadata.",
+}
+
+MBENCH_JUDGE_PROMPT = """
+You are a benchmark answer judge for open-ended memory evaluation questions.
+
+Label the generated answer as CORRECT or WRONG.
+
+Grading rules:
+- Mark CORRECT if the generated answer matches the meaning of any accepted correct answer.
+- Accept paraphrases, summaries, longer explanations, and equivalent wording.
+- Mark WRONG if the generated answer clearly agrees with any known incorrect answer.
+- Mark WRONG if the generated answer contradicts the accepted correct answers, misses the key point, or makes an unsupported over-confident choice.
+- Use the case description, facts, relation type, and relation subtype as supporting context, not as replacements for the accepted correct answers.
+- If the case is contradictory or nuanced, do not reward answers that collapse unresolved tension into an unjustified single conclusion.
+- Ignore style or tone differences; grade factual and decision correctness.
+
+Question:
+{question}
+
+Accepted correct answers:
+{accepted_correct_answers}
+
+Known incorrect answers:
+{known_incorrect_answers}
+
+Generated answer:
+{generated_answer}
+
+Facts:
+{facts}
+
+Case description:
+{case}
+
+Relation type:
+{relation_type}
+
+Relation subtype:
+{relation_subtype}
+
+Topic:
+{topic}
+
+Source:
+{source}
+
+Additional judging guidance:
+{relation_guidance}
+{source_guidance}
+
+Return JSON only with exactly two keys: label and reason.
+The label must be CORRECT or WRONG.
+The reason must be one brief sentence explaining the key grading decision.
+""".strip()
 
 
 class JudgeBackend(Protocol):
@@ -134,6 +250,8 @@ class DatasetPromptJudgeEvaluator:
         if dataset_family == "longmemeval":
             return self._evaluate_longmemeval(answer, question,
                                               reference_answer)
+        if dataset_family == "mbench":
+            return self._evaluate_mbench(answer, question, reference_answer)
         raise ValueError(
             f"Unsupported evaluation dataset family: {dataset_family}")
 
@@ -216,6 +334,69 @@ class DatasetPromptJudgeEvaluator:
             },
         )
 
+    def _evaluate_mbench(
+        self,
+        answer: AnswerRecord,
+        question: DatasetQuestion,
+        reference_answer: Any,
+    ) -> EvaluationRecord:
+        metadata = _mbench_metadata(question)
+        correct_answers = _reference_answers(reference_answer)
+        incorrect_answers = _reference_answers(metadata.get("incorrect_answers"))
+        generated_answer = _generated_answer_for_judge(answer)
+        prompt_name = MBENCH_PROMPT_NAME
+        verdict = _deterministic_reference_verdict(
+            generated_answer=generated_answer,
+            correct_answers=correct_answers,
+            incorrect_answers=incorrect_answers,
+        )
+        if verdict is None:
+            prompt = mbench_judge_prompt(
+                question=str(question.query),
+                generated_answer=generated_answer,
+                correct_answers=correct_answers,
+                incorrect_answers=incorrect_answers,
+                metadata=metadata,
+            )
+            raw_judge = self._backend_for("mbench").complete(prompt)
+            label, reason = _parse_mbench_judge(raw_judge)
+            judge_source = "llm_judge"
+        else:
+            passed, reason = verdict
+            label = "CORRECT" if passed else "WRONG"
+            raw_judge = json.dumps(
+                {
+                    "label": label,
+                    "reason": reason,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+            judge_source = "deterministic_reference_bypass"
+
+        passed = label == "CORRECT"
+        return EvaluationRecord(
+            item_id=answer.item_id,
+            question_id=answer.question_id,
+            evaluator_name=self.name,
+            score=1.0 if passed else 0.0,
+            passed=passed,
+            reference=reference_answer,
+            metrics={
+                "evaluated": True,
+                "dataset_family": "mbench",
+                "prompt_name": prompt_name,
+                "relation_type": _metadata_text(metadata, "relation_type"),
+                "relation_subtype": _metadata_text(metadata, "relation_subtype"),
+                "topic": _metadata_text(metadata, "topic"),
+                "source": _metadata_text(metadata, "source"),
+                "judge_label": label,
+                "judge_reason": reason,
+                "judge_raw": raw_judge,
+                "judge_source": judge_source,
+            },
+        )
+
     def _dataset_family(self, dataset: Dataset | None) -> str:
         if self.config.dataset_family != "auto":
             return self.config.dataset_family
@@ -224,6 +405,8 @@ class DatasetPromptJudgeEvaluator:
             return "locomo"
         if "longmemeval" in dataset_name:
             return "longmemeval"
+        if "mbench" in dataset_name or "subtlememory" in dataset_name:
+            return "mbench"
         raise ValueError(
             "Cannot infer evaluation dataset family. Set DatasetPromptJudgeConfig.dataset_family."
         )
@@ -240,7 +423,7 @@ class DatasetPromptJudgeEvaluator:
             base_url=self.config.base_url,
             api_key=self.config.api_key,
             response_format={"type": "json_object"}
-            if dataset_family == "locomo" else None,
+            if dataset_family in {"locomo", "mbench"} else None,
             max_tokens=self.config.max_tokens,
         )
 
@@ -314,6 +497,36 @@ def longmemeval_prompt(
     raise NotImplementedError(f"Unsupported LongMemEval question type: {task}")
 
 
+def mbench_judge_prompt(
+    *,
+    question: str,
+    generated_answer: str,
+    correct_answers: list[str],
+    incorrect_answers: list[str],
+    metadata: dict[str, Any],
+) -> str:
+    return MBENCH_JUDGE_PROMPT.format(
+        question=question,
+        accepted_correct_answers=_format_reference_block(correct_answers),
+        known_incorrect_answers=_format_reference_block(
+            incorrect_answers,
+            empty_placeholder="(no explicit incorrect references provided)",
+        ),
+        generated_answer=generated_answer,
+        facts=_format_reference_block(
+            _reference_answers(metadata.get("facts")),
+            empty_placeholder="(no facts provided)",
+        ),
+        case=_optional_text(metadata.get("case")),
+        relation_type=_optional_text(metadata.get("relation_type")),
+        relation_subtype=_optional_text(metadata.get("relation_subtype")),
+        topic=_optional_text(metadata.get("topic")),
+        source=_optional_text(metadata.get("source")),
+        relation_guidance=_relation_guidance(metadata),
+        source_guidance=_source_guidance(metadata),
+    )
+
+
 def _skipped_record(
     answer: AnswerRecord,
     question: DatasetQuestion,
@@ -348,6 +561,8 @@ def _prompt_name(dataset_family: str) -> str:
         return LOCOMO_PROMPT_NAME
     if dataset_family == "longmemeval":
         return LONGMEMEVAL_PROMPT_NAME
+    if dataset_family == "mbench":
+        return MBENCH_PROMPT_NAME
     return "unknown"
 
 
@@ -362,6 +577,8 @@ def _has_nonempty_gold_answer(value: Any) -> bool:
         return False
     if isinstance(value, str):
         return bool(value.strip())
+    if isinstance(value, list | tuple | set | frozenset):
+        return bool(_reference_answers(value))
     return True
 
 
@@ -395,3 +612,171 @@ def _parse_locomo_label(raw_judge: str) -> str | None:
     if "WRONG" in normalized:
         return "WRONG"
     return None
+
+
+def _mbench_metadata(question: DatasetQuestion) -> dict[str, Any]:
+    metadata = dict(question.metadata)
+    if question.label is not None:
+        metadata.update(question.label.metadata)
+    return metadata
+
+
+def _reference_answers(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list | tuple | set | frozenset):
+        return [
+            text for item in value
+            if (text := _clean_text(item))
+        ]
+    text = _clean_text(value)
+    return [text] if text else []
+
+
+def _deterministic_reference_verdict(
+    *,
+    generated_answer: str,
+    correct_answers: list[str],
+    incorrect_answers: list[str],
+) -> tuple[bool, str] | None:
+    normalized_generated = _normalize_reference_text(generated_answer)
+    if not normalized_generated:
+        return None
+
+    correct = {
+        _normalize_reference_text(answer)
+        for answer in correct_answers
+        if answer
+    }
+    if normalized_generated in correct:
+        return True, "Generated answer exactly matches an accepted correct reference."
+
+    incorrect = {
+        _normalize_reference_text(answer)
+        for answer in incorrect_answers
+        if answer
+    }
+    if normalized_generated in incorrect:
+        return False, "Generated answer exactly matches a known incorrect reference."
+
+    return None
+
+
+def _parse_mbench_judge(raw_judge: str) -> tuple[str, str]:
+    payload = _extract_json_object(raw_judge)
+    if payload is not None:
+        label = str(payload.get("label", "")).strip().upper()
+        reason = _clean_text(payload.get("reason"))
+        if label == "CORRECT":
+            return "CORRECT", reason
+        if label == "WRONG":
+            return "WRONG", reason
+
+    label = _parse_mbench_text_label(raw_judge)
+    return label, ""
+
+
+def _extract_json_object(raw_text: str) -> dict[str, Any] | None:
+    text = str(raw_text or "").strip()
+    if not text:
+        return None
+    for candidate in (
+        text,
+        _regex_group(r"```(?:json)?\s*(\{.*?\})\s*```", text),
+        _regex_group(r"(\{[^{}]*\"label\"\s*:[^{}]*\})", text),
+    ):
+        if not candidate:
+            continue
+        try:
+            value = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            return value
+    return None
+
+
+def _parse_mbench_text_label(raw_judge: str) -> str:
+    normalized = str(raw_judge or "").strip().upper()
+    if not normalized:
+        return "WRONG"
+    if re.search(r"\bWRONG\b", normalized) or re.search(
+        r"\bINCORRECT\b", normalized
+    ):
+        return "WRONG"
+    if re.search(r"\bCORRECT\b", normalized):
+        return "CORRECT"
+    return "WRONG"
+
+
+def _regex_group(pattern: str, text: str) -> str | None:
+    match = re.search(pattern, text, re.DOTALL)
+    return match.group(1).strip() if match else None
+
+
+def _format_reference_block(
+    answers: list[str],
+    *,
+    empty_placeholder: str = "(none)",
+) -> str:
+    if not answers:
+        return empty_placeholder
+    return "\n".join(f"- {answer}" for answer in answers)
+
+
+def _relation_guidance(metadata: dict[str, Any]) -> str:
+    relation_type = _relation_type_key(metadata.get("relation_type"))
+    relation_subtype = _relation_subtype_key(metadata.get("relation_subtype"))
+    if relation_type == "default" and relation_subtype == "default":
+        return ""
+    return "\n".join((
+        "Relation semantics guidance:",
+        (
+            f"- Relation type guidance ({relation_type}): "
+            f"{RELATION_TYPE_GUIDANCE[relation_type]}"
+        ),
+        (
+            f"- Relation subtype guidance ({relation_subtype}): "
+            f"{RELATION_SUBTYPE_GUIDANCE[relation_subtype]}"
+        ),
+    ))
+
+
+def _source_guidance(metadata: dict[str, Any]) -> str:
+    source = _source_key(metadata.get("source"))
+    if source == "default" and not _metadata_text(metadata, "source"):
+        return ""
+    return f"Source guidance ({source}): {SOURCE_GUIDANCE[source]}"
+
+
+def _relation_type_key(value: Any) -> str:
+    key = _metadata_text({"value": value}, "value")
+    return key if key in RELATION_TYPE_GUIDANCE else "default"
+
+
+def _relation_subtype_key(value: Any) -> str:
+    raw = _metadata_text({"value": value}, "value")
+    key = RELATION_SUBTYPE_ALIASES.get(raw, raw)
+    return key if key in RELATION_SUBTYPE_GUIDANCE else "default"
+
+
+def _source_key(value: Any) -> str:
+    key = _metadata_text({"value": value}, "value")
+    return key if key in SOURCE_GUIDANCE else "default"
+
+
+def _metadata_text(metadata: dict[str, Any], key: str) -> str:
+    return _clean_text(metadata.get(key))
+
+
+def _optional_text(value: Any, *, empty_placeholder: str = "(none)") -> str:
+    text = _clean_text(value)
+    return text or empty_placeholder
+
+
+def _clean_text(value: Any) -> str:
+    return " ".join(str(value or "").split()).strip()
+
+
+def _normalize_reference_text(value: Any) -> str:
+    return _clean_text(value).lower()

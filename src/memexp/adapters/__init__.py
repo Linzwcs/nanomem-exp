@@ -2,6 +2,7 @@
 
 from memexp.adapters.longmemeval import longmemeval_records_to_unified
 from memexp.adapters.locomo import locomo_records_to_unified
+from memexp.adapters.mbench import mbench_records_to_unified
 from memexp.adapters.unified import (
     SCHEMA_VERSION,
     load_unified_dataset,
@@ -14,6 +15,7 @@ __all__ = [
     "load_unified_dataset",
     "longmemeval_records_to_unified",
     "locomo_records_to_unified",
+    "mbench_records_to_unified",
     "stream_json_array",
     "unified_payload_to_dataset",
 ]

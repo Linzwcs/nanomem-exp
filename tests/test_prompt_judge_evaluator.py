@@ -10,8 +10,10 @@ from memexp import (
     DatasetQuestion,
     EvaluationRunner,
     LOCOMO_ACCURACY_PROMPT,
+    MBENCH_PROMPT_NAME,
     QuestionLabel,
     longmemeval_prompt,
+    mbench_judge_prompt,
 )
 
 
@@ -222,6 +224,182 @@ class DatasetPromptJudgeEvaluatorTest(unittest.TestCase):
             result.summary["by_question_category"]["5"]["skipped_count"],
             1,
         )
+
+    def test_mbench_exact_correct_reference_bypasses_judge_call(self) -> None:
+        backend = FakeJudgeBackend('{"label":"WRONG"}')
+        evaluator = DatasetPromptJudgeEvaluator(backend=backend)
+        dataset = Dataset(
+            name="mbench_persona_0",
+            items=(
+                DatasetItem(
+                    item_id="persona_0",
+                    conversations=(),
+                    questions=(
+                        DatasetQuestion(
+                            question_id="instance-1:q1",
+                            query="Which class should I pick?",
+                            label=QuestionLabel(
+                                reference_answer=(
+                                    "needs confirmation: live class, self-paced course",
+                                ),
+                                metadata={
+                                    "incorrect_answers": ["Open Motion Academy"],
+                                },
+                            ),
+                            metadata={
+                                "relation_type": "contradictory",
+                                "relation_subtype": "contradictory",
+                                "question_category": "contradictory",
+                            },
+                        ),
+                    ),
+                ),
+            ),
+        )
+        answer = AnswerRecord(
+            item_id="persona_0",
+            question_id="instance-1:q1",
+            query="Which class should I pick?",
+            answer="needs confirmation: live class, self-paced course",
+            agent_name="test-agent",
+        )
+
+        result = EvaluationRunner(evaluator).run(dataset, (answer,))
+
+        self.assertEqual(backend.prompts, [])
+        record = result.record_for("persona_0", "instance-1:q1")
+        self.assertTrue(record.passed)
+        self.assertEqual(record.metrics["prompt_name"], MBENCH_PROMPT_NAME)
+        self.assertEqual(
+            record.metrics["judge_source"],
+            "deterministic_reference_bypass",
+        )
+        self.assertEqual(
+            result.summary["by_question_category"]["contradictory"]["accuracy"],
+            1.0,
+        )
+
+    def test_mbench_prompt_uses_correct_incorrect_and_relation_guidance(self) -> None:
+        backend = FakeJudgeBackend(
+            '{"label":"CORRECT","reason":"It asks for clarification."}'
+        )
+        evaluator = DatasetPromptJudgeEvaluator(backend=backend)
+        dataset = Dataset(
+            name="mbench_persona_0",
+            items=(
+                DatasetItem(
+                    item_id="persona_0",
+                    conversations=(),
+                    questions=(
+                        DatasetQuestion(
+                            question_id="instance-2:q1",
+                            query="Which Python signup should I choose?",
+                            label=QuestionLabel(
+                                reference_answer=(
+                                    "Clarify live versus self-paced preference first.",
+                                ),
+                                evidence_ids=("session-a", "session-b"),
+                                metadata={
+                                    "incorrect_answers": [
+                                        "Open Motion Academy",
+                                    ],
+                                    "facts": [
+                                        "Amara both likes and dislikes self-paced coding courses.",
+                                    ],
+                                    "case": (
+                                        "Amara gives conflicting accounts of "
+                                        "self-paced coding courses."
+                                    ),
+                                },
+                            ),
+                            metadata={
+                                "relation_type": "contradictory",
+                                "relation_subtype": "contradictory",
+                                "topic": "Technology",
+                                "source": "user-related",
+                                "question_category": "contradictory",
+                            },
+                        ),
+                    ),
+                ),
+            ),
+        )
+        answer = AnswerRecord(
+            item_id="persona_0",
+            question_id="instance-2:q1",
+            query="Which Python signup should I choose?",
+            answer="I would ask you to clarify the format first.",
+            agent_name="test-agent",
+        )
+
+        result = EvaluationRunner(evaluator).run(dataset, (answer,))
+
+        expected_prompt = mbench_judge_prompt(
+            question="Which Python signup should I choose?",
+            generated_answer="I would ask you to clarify the format first.",
+            correct_answers=["Clarify live versus self-paced preference first."],
+            incorrect_answers=["Open Motion Academy"],
+            metadata={
+                "relation_type": "contradictory",
+                "relation_subtype": "contradictory",
+                "topic": "Technology",
+                "source": "user-related",
+                "question_category": "contradictory",
+                "incorrect_answers": ["Open Motion Academy"],
+                "facts": [
+                    "Amara both likes and dislikes self-paced coding courses.",
+                ],
+                "case": (
+                    "Amara gives conflicting accounts of "
+                    "self-paced coding courses."
+                ),
+            },
+        )
+        self.assertEqual(backend.prompts, [expected_prompt])
+        self.assertIn("Known incorrect answers:\n- Open Motion Academy", backend.prompts[0])
+        self.assertIn("Relation semantics guidance:", backend.prompts[0])
+        record = result.record_for("persona_0", "instance-2:q1")
+        self.assertTrue(record.passed)
+        self.assertEqual(record.score, 1.0)
+        self.assertEqual(record.metrics["dataset_family"], "mbench")
+        self.assertEqual(record.metrics["judge_reason"], "It asks for clarification.")
+        self.assertEqual(record.metadata["judge_response"], answer.answer)
+
+    def test_mbench_text_incorrect_label_is_wrong(self) -> None:
+        backend = FakeJudgeBackend("INCORRECT")
+        evaluator = DatasetPromptJudgeEvaluator(backend=backend)
+        dataset = Dataset(
+            name="mbench_persona_0",
+            items=(
+                DatasetItem(
+                    item_id="persona_0",
+                    conversations=(),
+                    questions=(
+                        DatasetQuestion(
+                            question_id="instance-3:q1",
+                            query="Which option?",
+                            label=QuestionLabel(
+                                reference_answer=("Ask for clarification.",),
+                            ),
+                            metadata={"relation_type": "contradictory"},
+                        ),
+                    ),
+                ),
+            ),
+        )
+        answer = AnswerRecord(
+            item_id="persona_0",
+            question_id="instance-3:q1",
+            query="Which option?",
+            answer="Choose Open Motion Academy.",
+            agent_name="test-agent",
+        )
+
+        result = EvaluationRunner(evaluator).run(dataset, (answer,))
+
+        record = result.record_for("persona_0", "instance-3:q1")
+        self.assertFalse(record.passed)
+        self.assertEqual(record.metrics["judge_label"], "WRONG")
 
 
 if __name__ == "__main__":

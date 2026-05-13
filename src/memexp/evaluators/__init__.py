@@ -8,8 +8,11 @@ from memexp.evaluators.judge import (
     LOCOMO_ACCURACY_PROMPT,
     LOCOMO_PROMPT_NAME,
     LONGMEMEVAL_PROMPT_NAME,
+    MBENCH_JUDGE_PROMPT,
+    MBENCH_PROMPT_NAME,
     OpenAICompatibleJudgeBackend,
     longmemeval_prompt,
+    mbench_judge_prompt,
 )
 from memexp.evaluators.simple import ContainsEvaluator, ContainsEvaluatorConfig
 
@@ -24,6 +27,9 @@ __all__ = [
     "LOCOMO_ACCURACY_PROMPT",
     "LOCOMO_PROMPT_NAME",
     "LONGMEMEVAL_PROMPT_NAME",
+    "MBENCH_JUDGE_PROMPT",
+    "MBENCH_PROMPT_NAME",
     "OpenAICompatibleJudgeBackend",
     "longmemeval_prompt",
+    "mbench_judge_prompt",
 ]

@@ -18,6 +18,7 @@ from memexp.adapters import (
     load_unified_dataset,
     longmemeval_records_to_unified,
     locomo_records_to_unified,
+    mbench_records_to_unified,
     stream_json_array,
     unified_payload_to_dataset,
 )
@@ -42,8 +43,11 @@ from memexp.evaluators import (
     LOCOMO_ACCURACY_PROMPT,
     LOCOMO_PROMPT_NAME,
     LONGMEMEVAL_PROMPT_NAME,
+    MBENCH_JUDGE_PROMPT,
+    MBENCH_PROMPT_NAME,
     OpenAICompatibleJudgeBackend,
     longmemeval_prompt,
+    mbench_judge_prompt,
 )
 from memexp.memsys.baselines import (
     NullMemoryConfig,
@@ -135,6 +139,8 @@ __all__ = [
     "LOCOMO_ACCURACY_PROMPT",
     "LOCOMO_PROMPT_NAME",
     "LONGMEMEVAL_PROMPT_NAME",
+    "MBENCH_JUDGE_PROMPT",
+    "MBENCH_PROMPT_NAME",
     "JsonStageCache",
     "JsonlRecordSink",
     "JsonlRunLogger",
@@ -183,6 +189,8 @@ __all__ = [
     "longmemeval_prompt",
     "longmemeval_records_to_unified",
     "locomo_records_to_unified",
+    "mbench_records_to_unified",
+    "mbench_judge_prompt",
     "markdown_report_table",
     "object_cache_spec",
     "render_think_step_by_step_prompt",
